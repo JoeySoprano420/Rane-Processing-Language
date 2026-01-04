@@ -1,6 +1,9 @@
 #pragma once
 
 #include <windows.h>
+#include <cstdint>
+#include <cstddef>
+#include <cstdlib>
 #include <stdint.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -8,7 +11,6 @@
 #include <string.h>
 
 #include "rane_common.h"
-#include "rane_tir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,40 +51,7 @@ typedef enum rane_jit_tier_e : uint32_t {
 // Error codes (stable + parseable)
 // ---------------------------
 
-typedef enum {
-  RANE_OK = 0,
-  RANE_E_INVALID_ARG,
-  RANE_E_NOT_INITIALIZED,
-  RANE_E_ALREADY_INITIALIZED,
-  RANE_E_OS_API_FAIL,
-  RANE_E_VERSION_MISMATCH,
-  RANE_E_RESERVE_BAND_FAIL,
-  RANE_E_BAND_OVERLAP,
-  RANE_E_BAND_OUT_OF_RANGE,
-  RANE_E_LAYOUT_INVARIANT_FAIL,
-  RANE_E_AOT_LOAD_FAIL,
-  RANE_E_AOT_SLOT_OOB,
-  RANE_E_AOT_OUTSIDE_SLOT,
-  RANE_E_AOT_RELOCATED,
-  RANE_E_AOT_BAD_PE,
-  RANE_E_AOT_BAD_MACHINE,
-  RANE_E_AOT_SECTION_PERMS,
-  RANE_E_AOT_IMPORTS_INVALID,
-  RANE_E_JIT_RESERVE_FAIL,
-  RANE_E_JIT_COMMIT_FAIL,
-  RANE_E_JIT_OUTSIDE_BAND,
-  RANE_E_JIT_WX_VIOLATION,
-  RANE_E_JIT_SEAL_FAIL,
-  RANE_E_JIT_CFG_REG_FAIL,
-  RANE_E_JIT_REGISTRY_FAIL,
-  RANE_E_EXEC_OUTSIDE_ALLOWED,
-  RANE_E_RWX_FORBIDDEN,
-  RANE_E_PROTECT_TRANSITION_DENIED,
-  RANE_E_INVALID_INDIRECT_TARGET,
-  RANE_E_DIAG_PUBLISH_FAIL,
-  RANE_E_DIAG_ALREADY_PUBLISHED,
-  RANE_E_UNKNOWN = 0x7FFFFFFF
-} rane_error_t;
+
 
 // ---------------------------
 // Policy knobs
@@ -357,6 +326,8 @@ rane_jit_alloc_emit_seal(
 );
 
 // JIT for hot paths
+// Forward declare to avoid pulling in `rane_tir.h` here.
+typedef struct rane_tir_function_s rane_tir_function_t;
 rane_error_t rane_jit_hot_path(const rane_tir_function_t* func, void** out_code);
 
 // rane_policy_on_virtualprotect()
@@ -431,3 +402,16 @@ rane_classify_address(
 #ifdef __cplusplus
 } // extern "C"
 #endif
+
+
+
+
+
+
+
+
+
+
+
+
+

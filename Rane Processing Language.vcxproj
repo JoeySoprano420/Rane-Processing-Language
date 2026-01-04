@@ -128,12 +128,14 @@
     <ClInclude Include="rane_bst.h" />
     <ClInclude Include="rane_common.h" />
     <ClInclude Include="rane_crypto.h" />
+    <ClInclude Include="rane_driver.h" />
     <ClInclude Include="rane_except.h" />
     <ClInclude Include="rane_file.h" />
     <ClInclude Include="rane_gc.h" />
     <ClInclude Include="rane_graph.h" />
     <ClInclude Include="rane_hashmap.h" />
     <ClInclude Include="rane_heap.h" />
+    <ClInclude Include="rane_label.h" />
     <ClInclude Include="rane_lexer.h" />
     <ClInclude Include="rane_loader.h" />
     <ClInclude Include="rane_net.h" />
@@ -155,12 +157,14 @@
     <ClCompile Include="rane_aot.cpp" />
     <ClCompile Include="rane_bst.cpp" />
     <ClCompile Include="rane_crypto.cpp" />
+    <ClCompile Include="rane_driver.cpp" />
     <ClCompile Include="rane_except.cpp" />
     <ClCompile Include="rane_file.cpp" />
     <ClCompile Include="rane_gc.cpp" />
     <ClCompile Include="rane_graph.cpp" />
     <ClCompile Include="rane_hashmap.cpp" />
     <ClCompile Include="rane_heap.cpp" />
+    <ClCompile Include="rane_label.cpp" />
     <ClCompile Include="rane_lexer.cpp" />
     <ClCompile Include="rane_loader_impl.cpp" />
     <ClCompile Include="rane_net.cpp" />
@@ -179,6 +183,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="breakdown.md" />
+    <None Include="hello.rane" />
     <None Include="history.md" />
     <None Include="howto.md" />
     <None Include="README.md" />

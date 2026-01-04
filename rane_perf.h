@@ -1,5 +1,10 @@
 #pragma once
 
+#include <cstdint>
+#include <cstddef>
+#include <cstdlib>
+#include <stdint.h>
+
 // Performance Library for RANE
 // Profiling, benchmarking, parallel execution
 

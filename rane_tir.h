@@ -1,10 +1,12 @@
 #pragma once
 
+#include <cstdint>
+#include <cstddef>
+#include <cstdlib>
 #include <stdint.h>
 #include <stdlib.h>
 
 #include "rane_common.h"
-#include "rane_loader.h" // for types
 #include "rane_ast.h"
 
 // ---------------------------
@@ -33,6 +35,7 @@ typedef enum rane_tir_opcode_e {
   // Control flow
   TIR_JMP,
   TIR_JCC,
+  TIR_JCC_EXT,
   TIR_SWITCH,
   TIR_CALL_LOCAL,
   TIR_CALL_IMPORT,
@@ -115,6 +118,15 @@ typedef enum rane_tir_opcode_e {
   TIR_SANITIZE,
   TIR_PATCHPOINT
 } rane_tir_opcode_t;
+
+typedef enum rane_tir_cc_e {
+  TIR_CC_NE,
+  TIR_CC_E,
+  TIR_CC_L,
+  TIR_CC_LE,
+  TIR_CC_G,
+  TIR_CC_GE
+} rane_tir_cc_t;
 
 // ---------------------------
 // Operand kinds

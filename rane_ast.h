@@ -77,6 +77,7 @@ typedef enum rane_unary_op_e {
 // ---------------------------
 
 typedef enum rane_stmt_kind_e {
+  STMT_BLOCK,
   STMT_LET,
   STMT_ASSIGN,
   STMT_JUMP,
@@ -170,6 +171,10 @@ struct rane_expr_s {
 struct rane_stmt_s {
   rane_stmt_kind_e kind;
   union {
+    struct {
+      rane_stmt_t** stmts;
+      uint32_t stmt_count;
+    } block;
     struct {
       char name[64];
       rane_type_e type;

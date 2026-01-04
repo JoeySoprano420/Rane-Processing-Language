@@ -93,6 +93,12 @@
     <ClInclude Include="rane_common.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="rane_driver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rane_label.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="rane_loader_impl.cpp">
@@ -170,11 +176,18 @@
     <ClCompile Include="rane_perf.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="rane_driver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rane_label.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
     <None Include="howto.md" />
     <None Include="history.md" />
     <None Include="breakdown.md" />
+    <None Include="hello.rane" />
   </ItemGroup>
 </Project>

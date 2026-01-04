@@ -1,4 +1,5 @@
 #include "rane_thread.h"
+#include <cstddef>
 
 rane_thread_pool_t* rane_thread_pool_create(size_t num_threads) {
   return NULL;

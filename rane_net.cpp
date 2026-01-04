@@ -1,4 +1,5 @@
 #include "rane_net.h"
+#include <cstddef>
 
 rane_socket_t* rane_tcp_connect(const char* host, int port) {
   // Stub

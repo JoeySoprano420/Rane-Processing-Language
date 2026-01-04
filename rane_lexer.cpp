@@ -92,6 +92,8 @@ static rane_token_type_t identifier_type(rane_lexer_t* lex, size_t start, size_t
             break;
     case 5: if (memcmp(lex->source + start, "while", 5) == 0) return TOK_KW_WHILE;
             break;
+    case 6: if (memcmp(lex->source + start, "return", 6) == 0) return TOK_KW_RETURN;
+            break;
     // Add more as needed
   }
   return TOK_IDENTIFIER;
@@ -115,6 +117,19 @@ static rane_token_t number(rane_lexer_t* lex) {
   return make_token(lex, TOK_INT_LITERAL, lex->source + start, lex->pos - start);
 }
 
+static rane_token_t string_lit(rane_lexer_t* lex) {
+  // starting quote already consumed
+  size_t start = lex->pos;
+  while (!is_at_end(lex) && peek(lex) != '"') {
+    // TODO: handle escapes
+    advance(lex);
+  }
+  if (is_at_end(lex)) return error_token(lex, "Unterminated string literal");
+  size_t len = lex->pos - start;
+  advance(lex); // closing quote
+  return make_token(lex, TOK_STRING_LITERAL, lex->source + start, len);
+}
+
 rane_token_t rane_lexer_next(rane_lexer_t* lex) {
   skip_whitespace(lex);
   if (is_at_end(lex)) return make_token(lex, TOK_EOF, "", 0);
@@ -122,6 +137,7 @@ rane_token_t rane_lexer_next(rane_lexer_t* lex) {
   char c = advance(lex);
   if (isalpha(c) || c == '_') return identifier(lex);
   if (isdigit(c)) return number(lex);
+  if (c == '"') return string_lit(lex);
 
   switch (c) {
     case '(': return make_token(lex, TOK_KW_LPAREN, lex->source + lex->pos - 1, 1);
@@ -132,32 +148,47 @@ rane_token_t rane_lexer_next(rane_lexer_t* lex) {
     case ']': return make_token(lex, TOK_KW_RBRACKET, lex->source + lex->pos - 1, 1);
     case ';': return make_token(lex, TOK_KW_SEMICOLON, lex->source + lex->pos - 1, 1);
     case ',': return make_token(lex, TOK_KW_COMMA, lex->source + lex->pos - 1, 1);
-    case ':': if (match(lex, ':')) return make_token(lex, TOK_KW_DOUBLE_COLON, lex->source + lex->pos - 2, 2);
-              return make_token(lex, TOK_KW_COLON, lex->source + lex->pos - 1, 1);
-    case '=': if (match(lex, '>')) return make_token(lex, TOK_KW_MAPS_TO, lex->source + lex->pos - 2, 2);
-              return make_token(lex, TOK_KW_ASSIGN, lex->source + lex->pos - 1, 1);
-    case '-': if (match(lex, '>')) return make_token(lex, TOK_KW_ARROW, lex->source + lex->pos - 2, 2);
-              return make_token(lex, TOK_KW_MINUS, lex->source + lex->pos - 1, 1);
-    case '<': if (match(lex, '-')) return make_token(lex, TOK_KW_ASSIGN_INTO, lex->source + lex->pos - 2, 2);
-              return make_token(lex, TOK_KW_LESS, lex->source + lex->pos - 1, 1);
-    case '>': return make_token(lex, TOK_KW_GREATER, lex->source + lex->pos - 1, 1);
+
+    case ':':
+      if (match(lex, ':')) return make_token(lex, TOK_KW_DOUBLE_COLON, lex->source + lex->pos - 2, 2);
+      return make_token(lex, TOK_KW_COLON, lex->source + lex->pos - 1, 1);
+
+    case '=':
+      if (match(lex, '=')) return make_token(lex, TOK_KW_EQ, lex->source + lex->pos - 2, 2);
+      if (match(lex, '>')) return make_token(lex, TOK_KW_MAPS_TO, lex->source + lex->pos - 2, 2);
+      return make_token(lex, TOK_KW_ASSIGN, lex->source + lex->pos - 1, 1);
+
+    case '!':
+      if (match(lex, '=')) return make_token(lex, TOK_KW_NE, lex->source + lex->pos - 2, 2);
+      return make_token(lex, TOK_KW_EXCLAM, lex->source + lex->pos - 1, 1);
+
+    case '-':
+      if (match(lex, '>')) return make_token(lex, TOK_KW_ARROW, lex->source + lex->pos - 2, 2);
+      return make_token(lex, TOK_KW_MINUS, lex->source + lex->pos - 1, 1);
+
+    case '<':
+      if (match(lex, '=')) return make_token(lex, TOK_KW_LE, lex->source + lex->pos - 2, 2);
+      if (match(lex, '-')) return make_token(lex, TOK_KW_ASSIGN_INTO, lex->source + lex->pos - 2, 2);
+      return make_token(lex, TOK_KW_LT, lex->source + lex->pos - 1, 1);
+
+    case '>':
+      if (match(lex, '=')) return make_token(lex, TOK_KW_GE, lex->source + lex->pos - 2, 2);
+      return make_token(lex, TOK_KW_GT, lex->source + lex->pos - 1, 1);
+
     case '+': return make_token(lex, TOK_KW_PLUS, lex->source + lex->pos - 1, 1);
     case '*': return make_token(lex, TOK_KW_STAR, lex->source + lex->pos - 1, 1);
     case '/': return make_token(lex, TOK_KW_SLASH, lex->source + lex->pos - 1, 1);
     case '%': return make_token(lex, TOK_KW_PERCENT, lex->source + lex->pos - 1, 1);
+
     case '&': return make_token(lex, TOK_KW_AMP, lex->source + lex->pos - 1, 1);
     case '|': return make_token(lex, TOK_KW_PIPE, lex->source + lex->pos - 1, 1);
     case '^': return make_token(lex, TOK_KW_CARET, lex->source + lex->pos - 1, 1);
     case '~': return make_token(lex, TOK_KW_TILDE, lex->source + lex->pos - 1, 1);
-    case '!': return make_token(lex, TOK_KW_EXCLAM, lex->source + lex->pos - 1, 1);
     case '?': return make_token(lex, TOK_KW_QUESTION, lex->source + lex->pos - 1, 1);
     case '.': return make_token(lex, TOK_KW_DOT, lex->source + lex->pos - 1, 1);
     case '@': return make_token(lex, TOK_KW_AT, lex->source + lex->pos - 1, 1);
     case '#': return make_token(lex, TOK_KW_HASH, lex->source + lex->pos - 1, 1);
     case '$': return make_token(lex, TOK_KW_DOLLAR, lex->source + lex->pos - 1, 1);
-    case '"': return make_token(lex, TOK_KW_DOUBLEQUOTE, lex->source + lex->pos - 1, 1);
-    case '\'': return make_token(lex, TOK_KW_QUOTE, lex->source + lex->pos - 1, 1);
-    case '`': return make_token(lex, TOK_KW_BACKTICK, lex->source + lex->pos - 1, 1);
     case '\\': return make_token(lex, TOK_KW_BACKSLASH, lex->source + lex->pos - 1, 1);
     case '_': return make_token(lex, TOK_KW_UNDERSCORE, lex->source + lex->pos - 1, 1);
   }
@@ -177,6 +208,7 @@ const char* rane_token_type_str(rane_token_type_t type) {
     case TOK_KW_JUMP: return "JUMP";
     case TOK_KW_MARK: return "MARK";
     case TOK_KW_WHILE: return "WHILE";
+    case TOK_KW_RETURN: return "RETURN";
     // Add more
     default: return "UNKNOWN";
   }

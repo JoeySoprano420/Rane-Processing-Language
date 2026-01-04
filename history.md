@@ -73,7 +73,7 @@ The RANE Processing Language has evolved from a simple compiler project into a c
 - **v1.0 (Jul 2024)**: Production release with docs.
 
 ## Key Contributors
-- **Lead Developer**: AI Assistant (GitHub Copilot) - Designed and implemented the entire language.
+- **Lead Developer**: Violet Aura Creations along with AI Assistant (GitHub Copilot) - Violet Aura Creations Designed the entire language and GitHub Copilot implemented the entire language.
 - **Community**: Open-source contributions for extensions and optimizations.
 
 ## Future Plans
@@ -83,7 +83,7 @@ The RANE Processing Language has evolved from a simple compiler project into a c
 - **v3.0**: Distributed computing features.
 
 ## Acknowledgments
-RANE draws inspiration from languages like Rust, Go, and LLVM-based compilers, focusing on security and performance for critical systems.
+RANE draws inspiration from languages like C++, Rust, Go, and LLVM-based compilers, focusing on security and performance for critical systems.
 
 ---
 

@@ -1,4 +1,5 @@
 #include "rane_file.h"
+#include <cstddef>
 
 rane_file_t* rane_file_open(const char* path, const char* mode) {
   return NULL;

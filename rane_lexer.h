@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <cstddef>
+#include <cstdlib>
 #include <stdint.h>
 
 // RANE Lexer Tokens
@@ -75,6 +78,7 @@ typedef enum rane_token_type_e {
   TOK_KW_LABEL,
   TOK_KW_CALL,
   TOK_KW_RET,
+  TOK_KW_RETURN,
   TOK_KW_HALT,
   TOK_KW_TRAP_OP,
   TOK_KW_NOT,

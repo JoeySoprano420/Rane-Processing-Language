@@ -1,4 +1,5 @@
 #include "rane_perf.h"
+#include <cstddef>
 
 rane_profiler_t* rane_profiler_start() {
   return NULL;

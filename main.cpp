@@ -1,3 +1,8 @@
+#include "rane_driver.h"
+
+#include <stdio.h>
+#include <string.h>
+
 #include "rane_loader.h"
 #include "rane_parser.h"
 #include "rane_typecheck.h"
@@ -22,8 +27,37 @@
 #include "rane_perf.h"
 #include <iostream>
 
-int main() {
-    // Example usage of loader
+int main(int argc, char** argv) {
+    if (argc >= 2) {
+        const char* in = argv[1];
+        const char* out = "a.exe";
+        int opt = 2;
+
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+                out = argv[++i];
+            } else if (strcmp(argv[i], "-O0") == 0) opt = 0;
+            else if (strcmp(argv[i], "-O1") == 0) opt = 1;
+            else if (strcmp(argv[i], "-O2") == 0) opt = 2;
+            else if (strcmp(argv[i], "-O3") == 0) opt = 3;
+        }
+
+        rane_driver_options_t opts;
+        opts.input_path = in;
+        opts.output_path = out;
+        opts.opt_level = opt;
+
+        rane_error_t err = rane_compile_file_to_exe(&opts);
+        if (err != RANE_OK) {
+            fprintf(stderr, "rane: compile failed (%d)\n", (int)err);
+            return 1;
+        }
+
+        printf("rane: wrote %s\n", out);
+        return 0;
+    }
+
+    // Fallback: keep existing in-process demo path
     rane_layout_spec_t layout = {};
     layout.abi_version = RANE_LOADER_ABI_VERSION;
     layout.aot_band_base = 0x0000000200000000ULL;
@@ -96,7 +130,7 @@ int main() {
     // Codegen
     uint8_t code_buf[1024];
     rane_codegen_ctx_t ctx = { code_buf, sizeof(code_buf), 0 };
-    err = rane_codegen_tir_to_x64(&tir_mod, &ctx);
+    err = rane_x64_codegen_tir_to_machine(&tir_mod, &ctx);
     if (err != RANE_OK) {
         std::cout << "Codegen failed" << std::endl;
         return 1;
