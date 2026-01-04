@@ -1,6 +1,7 @@
 #include "rane_tir.h"
 #include "rane_x64.h"
 #include "rane_ast.h"
+#include "rane_aot.h"
 #include "rane_label.h"
 #include <stdlib.h>
 #include <string.h>
@@ -410,12 +411,11 @@ rane_error_t rane_codegen_tir_to_x64(const rane_tir_module_t* tir_module, rane_c
   uint32_t label_count = 0;
   rane_x64_fixup_t fixups[512];
   uint32_t fixup_count = 0;
-  typedef struct call_fixup_s {
-    char sym[64];
-    uint64_t patch_offset; // start of instruction sequence that needs rewriting
-  } call_fixup_t;
-  call_fixup_t call_fixups[128];
-  uint32_t call_fixup_count = 0;
+
+  // Reset exported call fixup list
+  if (ctx && ctx->call_fixups) {
+    ctx->call_fixup_count = 0;
+  }
 
   if (tir_module->function_count > 0) {
     const rane_tir_function_t* func = &tir_module->functions[0];
@@ -507,70 +507,35 @@ rane_error_t rane_codegen_tir_to_x64(const rane_tir_module_t* tir_module, rane_c
         rane_x64_emit_mov_reg_reg(&emitter, 1 /*RCX*/, 0 /*RAX*/);
         rane_x64_emit_mov_reg_reg(&emitter, 2 /*RDX*/, 1 /*RCX*/);
 
-        // Placeholder: emit 9 bytes to be rewritten by the driver into:
-        //   mov rax, [rip+disp32]
-        //   call rax
-        // Patch offset points at start of this placeholder.
         uint64_t patch_start = emitter.offset;
-        uint8_t placeholder[9] = { 0xE8, 0, 0, 0, 0, 0x90, 0x90, 0x90, 0x90 }; // call + nops
+        uint8_t placeholder[9] = { 0xE8, 0, 0, 0, 0, 0x90, 0x90, 0x90, 0x90 };
         rane_x64_emit_bytes(&emitter, placeholder, sizeof(placeholder));
 
-        if (call_fixup_count < 128) {
-          strcpy_s(call_fixups[call_fixup_count].sym, sizeof(call_fixups[call_fixup_count].sym), inst->operands[0].lbl);
-          call_fixups[call_fixup_count].patch_offset = patch_start;
-          call_fixup_count++;
+        // Export fixup to caller if requested
+        if (ctx && ctx->call_fixups && ctx->call_fixup_count < ctx->call_fixup_capacity) {
+          rane_aot_call_fixup_t* fixups_out = (rane_aot_call_fixup_t*)ctx->call_fixups;
+          rane_aot_call_fixup_t* f = &fixups_out[ctx->call_fixup_count++];
+          strcpy_s(f->sym, sizeof(f->sym), inst->operands[0].lbl);
+          f->code_offset = (uint32_t)patch_start;
         }
         continue;
       }
-
-      if (inst->opcode == TIR_RET) {
-        uint8_t add_rsp[] = { 0x48, 0x83, 0xC4, 0x28 };
-        uint8_t mov_rsp_rbp[] = { 0x48, 0x89, 0xEC };
-        uint8_t pop_rbp = 0x5D;
-        rane_x64_emit_bytes(&emitter, add_rsp, sizeof(add_rsp));
-        rane_x64_emit_bytes(&emitter, mov_rsp_rbp, sizeof(mov_rsp_rbp));
-        rane_x64_emit_bytes(&emitter, &pop_rbp, 1);
-        rane_x64_emit_ret(&emitter);
-        continue;
-      }
-
-      if (inst->opcode == TIR_JCC_EXT && inst->operand_count == 2 &&
-          inst->operands[0].kind == TIR_OPERAND_IMM && inst->operands[1].kind == TIR_OPERAND_LBL) {
-        rane_tir_cc_t cc = (rane_tir_cc_t)inst->operands[0].imm;
-        // Emit rel32 placeholder
-        switch (cc) {
-          case TIR_CC_E:  rane_x64_emit_je_rel32(&emitter, 0); break;
-          case TIR_CC_NE: rane_x64_emit_jne_rel32(&emitter, 0); break;
-          case TIR_CC_L:  rane_x64_emit_jl_rel32(&emitter, 0); break;
-          case TIR_CC_LE: rane_x64_emit_jle_rel32(&emitter, 0); break;
-          case TIR_CC_G:  rane_x64_emit_jg_rel32(&emitter, 0); break;
-          case TIR_CC_GE: rane_x64_emit_jge_rel32(&emitter, 0); break;
-          default:        rane_x64_emit_jne_rel32(&emitter, 0); break;
-        }
-
-        if (fixup_count < 512) {
-          strcpy_s(fixups[fixup_count].label, sizeof(fixups[fixup_count].label), inst->operands[1].lbl);
-          fixups[fixup_count].patch_offset = emitter.offset - 4;
-          fixups[fixup_count].kind = 0; // unused
-          fixup_count++;
-        }
-        continue;
-      }
-    }
-
-    // Second pass: patch rel32
-    for (uint32_t fi = 0; fi < fixup_count; fi++) {
-      uint64_t target_off = 0;
-      if (!find_label_offset(labels, label_count, fixups[fi].label, &target_off)) continue;
-
-      // rel32 is relative to next instruction after rel32 immediate
-      uint64_t patch_off = fixups[fi].patch_offset;
-      uint64_t next_ip = patch_off + 4;
-      int32_t rel = (int32_t)((int64_t)target_off - (int64_t)next_ip);
-      memcpy(emitter.buffer + patch_off, &rel, 4);
     }
   }
 
+  // Second pass: patch rel32
+  for (uint32_t fi = 0; fi < fixup_count; fi++) {
+    uint64_t target_off = 0;
+    if (!find_label_offset(labels, label_count, fixups[fi].label, &target_off)) continue;
+
+    // rel32 is relative to next instruction after rel32 immediate
+    uint64_t patch_off = fixups[fi].patch_offset;
+    uint64_t next_ip = patch_off + 4;
+    int32_t rel = (int32_t)((int64_t)target_off - (int64_t)next_ip);
+    memcpy(emitter.buffer + patch_off, &rel, 4);
+  }
+
+  // Finished
   ctx->code_size = emitter.offset;
   return RANE_OK;
 }

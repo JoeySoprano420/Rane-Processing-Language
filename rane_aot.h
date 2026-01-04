@@ -4,7 +4,10 @@
 #include <cstddef>
 #include <cstdlib>
 
-#include "rane_tir.h"
+#include "rane_common.h"
+
+// Forward declare TIR module to avoid include cycles.
+typedef struct rane_tir_module_s rane_tir_module_t;
 
 // AOT Compilation: Compile TIR to x64 ahead-of-time
 rane_error_t rane_aot_compile(const rane_tir_module_t* tir_module, void** out_code, size_t* out_size);

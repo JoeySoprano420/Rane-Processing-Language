@@ -60,12 +60,29 @@ int main(int argc, char** argv) {
     // Fallback: keep existing in-process demo path
     rane_layout_spec_t layout = {};
     layout.abi_version = RANE_LOADER_ABI_VERSION;
+
+    // Provide a complete fixed layout so strict band reservation succeeds.
+    layout.core_band_base = 0x0000000100000000ULL;
+    layout.core_band_size = 0x0000000010000000ULL; // 256MB
+
     layout.aot_band_base = 0x0000000200000000ULL;
-    layout.aot_slot_size = 0x0000000010000000ULL;
-    layout.aot_slots = 32;
+    layout.aot_slot_size = 0x0000000001000000ULL; // 16MB
+    layout.aot_slots = 32;                         // 512MB AOT band
+
     layout.jit_band_base = 0x0000000600000000ULL;
-    layout.jit_band_size = 0x0000000100000000ULL;
-    // ... fill others
+    layout.jit_band_size = 0x0000000010000000ULL; // 256MB
+    layout.jit_tier1_off = 0x0;
+    layout.jit_tier2_off = 0x04000000ULL;   // 64MB
+    layout.jit_stubs_off = 0x08000000ULL;   // 128MB
+
+    layout.meta_band_base = 0x0000000700000000ULL;
+    layout.meta_band_size = 0x0000000010000000ULL; // 256MB
+
+    layout.heap_band_base = 0x0000000800000000ULL;
+    layout.heap_band_size = 0x0000000040000000ULL; // 1GB
+
+    layout.mmap_band_base = 0x0000000C00000000ULL;
+    layout.mmap_band_size = 0x0000000040000000ULL; // 1GB
 
     rane_policy_t policy = {};
     policy.abi_version = RANE_LOADER_ABI_VERSION;

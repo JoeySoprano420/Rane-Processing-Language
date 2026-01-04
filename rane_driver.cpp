@@ -339,33 +339,34 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   memcpy(rdata + off_fmt, fmt, fmt_len);
   memcpy(rdata + off_user, user_str, user_len);
 
-  // Patch calls using fixups if present
-  if (aot.call_fixup_count > 0 && aot.call_fixups) {
-    for (uint32_t i = 0; i < aot.call_fixup_count; i++) {
-      if (strcmp(aot.call_fixups[i].sym, "printf") != 0) continue;
-      uint32_t off = aot.call_fixups[i].code_offset;
-      if (off + 9 > code_size) continue;
-
-      // Overwrite placeholder with: 48 8B 05 disp32 ; FF D0
-      uint8_t* c = (uint8_t*)code;
-      c[off + 0] = 0x48;
-      c[off + 1] = 0x8B;
-      c[off + 2] = 0x05;
-      int32_t disp = (int32_t)(iat_va - (image_base + 0x1000 + (uint32_t)off + 7));
-      memcpy(c + off + 3, &disp, 4);
-      c[off + 7] = 0xFF;
-      c[off + 8] = 0xD0;
-    }
+  // Patch calls using fixups (required)
+  if (aot.call_fixup_count == 0 || !aot.call_fixups) {
+    free(rdata);
+    free(code);
+    free(src);
+    return RANE_E_INVALID_ARG;
   }
 
-  // Heuristic fallback: patch first call if no fixups were produced
-  if (aot.call_fixup_count == 0) {
-    // ...existing heuristic patch loop...
+  for (uint32_t i = 0; i < aot.call_fixup_count; i++) {
+    if (strcmp(aot.call_fixups[i].sym, "printf") != 0) continue;
+    uint32_t off = aot.call_fixups[i].code_offset;
+    if (off + 9 > code_size) continue;
+
+    // Overwrite placeholder with: 48 8B 05 disp32 ; FF D0
+    uint8_t* c = (uint8_t*)code;
+    c[off + 0] = 0x48;
+    c[off + 1] = 0x8B;
+    c[off + 2] = 0x05;
+    int32_t disp = (int32_t)(iat_va - (image_base + 0x1000 + (uint32_t)off + 7));
+    memcpy(c + off + 3, &disp, 4);
+    c[off + 7] = 0xFF;
+    c[off + 8] = 0xD0;
   }
 
   // Emit exe with printf import
   err = rane_write_pe64_exe_with_printf(opts->output_path, (const uint8_t*)code, (uint32_t)code_size, rdata, rdata_size);
 
+  free(aot.call_fixups);
   free(rdata);
   free(code);
   free(src);

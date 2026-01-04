@@ -199,7 +199,11 @@ typedef struct rane_codegen_ctx_s {
   uint8_t* code_buffer;
   uint64_t buffer_size;
   uint64_t code_size;
-  // Register allocation, etc.
+
+  // Optional: capture import callsites for deterministic patching.
+  void* call_fixups;
+  uint32_t call_fixup_count;
+  uint32_t call_fixup_capacity;
 } rane_codegen_ctx_t;
 
 rane_error_t rane_x64_codegen_tir_to_machine(const rane_tir_module_t* tir_module, rane_codegen_ctx_t* ctx);
