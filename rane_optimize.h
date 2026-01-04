@@ -78,3 +78,6 @@ rane_error_t rane_opt_march_native(rane_tir_module_t* mod); // Use all CPU featu
 
 // Main optimization driver
 rane_error_t rane_optimize_tir(rane_tir_module_t* tir_module);
+
+// Driver-selectable optimization (0..3)
+rane_error_t rane_optimize_tir_with_level(rane_tir_module_t* tir_module, int opt_level);

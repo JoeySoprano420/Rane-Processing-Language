@@ -128,6 +128,7 @@
     <ClInclude Include="rane_bst.h" />
     <ClInclude Include="rane_common.h" />
     <ClInclude Include="rane_crypto.h" />
+    <ClInclude Include="rane_diag.h" />
     <ClInclude Include="rane_driver.h" />
     <ClInclude Include="rane_except.h" />
     <ClInclude Include="rane_file.h" />
@@ -141,6 +142,7 @@
     <ClInclude Include="rane_net.h" />
     <ClInclude Include="rane_optimize.h" />
     <ClInclude Include="rane_parser.h" />
+    <ClInclude Include="rane_parser_ex.h" />
     <ClInclude Include="rane_perf.h" />
     <ClInclude Include="rane_regalloc.h" />
     <ClInclude Include="rane_security.h" />
@@ -182,6 +184,7 @@
     <ClCompile Include="rane_x64.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="about.md" />
     <None Include="breakdown.md" />
     <None Include="hello.rane" />
     <None Include="history.md" />

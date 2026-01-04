@@ -23,36 +23,9 @@ static int find_label_offset(const rane_x64_label_map_entry_t* labels, uint32_t 
   return 0;
 }
 
-// Lowering AST to TIR
-rane_error_t rane_lower_ast_to_tir(const rane_stmt_t* ast_root, rane_tir_module_t* tir_module) {
-  if (!ast_root || !tir_module) return RANE_E_INVALID_ARG;
-
-  // Initialize module
-  tir_module->name[0] = 0;
-  tir_module->functions = (rane_tir_function_t*)malloc(sizeof(rane_tir_function_t));
-  tir_module->function_count = 1;
-  tir_module->max_functions = 1;
-  rane_tir_function_t* func = &tir_module->functions[0];
-  strcpy_s(func->name, sizeof(func->name), "main");
-  func->insts = (rane_tir_inst_t*)malloc(sizeof(rane_tir_inst_t) * 1024);
-  func->inst_count = 0;
-  func->max_insts = 1024;
-
-  rane_label_gen_init(&g_lbl);
-  lower_stmt_to_tir(ast_root, func);
-
-  // Ensure a RET at end
-  rane_tir_inst_t ret_inst;
-  ret_inst.opcode = TIR_RET;
-  ret_inst.type = RANE_TYPE_U64;
-  ret_inst.operand_count = 0;
-  func->insts[func->inst_count++] = ret_inst;
-
-  return RANE_OK;
-}
-
 static void emit_label(rane_tir_function_t* func, const char* name) {
   rane_tir_inst_t inst;
+  memset(&inst, 0, sizeof(inst));
   inst.opcode = TIR_LABEL;
   inst.type = RANE_TYPE_U64;
   inst.operands[0].kind = TIR_OPERAND_LBL;
@@ -63,17 +36,8 @@ static void emit_label(rane_tir_function_t* func, const char* name) {
 
 static void emit_jmp(rane_tir_function_t* func, const char* target) {
   rane_tir_inst_t inst;
+  memset(&inst, 0, sizeof(inst));
   inst.opcode = TIR_JMP;
-  inst.type = RANE_TYPE_U64;
-  inst.operands[0].kind = TIR_OPERAND_LBL;
-  strcpy_s(inst.operands[0].lbl, sizeof(inst.operands[0].lbl), target);
-  inst.operand_count = 1;
-  func->insts[func->inst_count++] = inst;
-}
-
-static void emit_jcc(rane_tir_function_t* func, const char* target) {
-  rane_tir_inst_t inst;
-  inst.opcode = TIR_JCC;
   inst.type = RANE_TYPE_U64;
   inst.operands[0].kind = TIR_OPERAND_LBL;
   strcpy_s(inst.operands[0].lbl, sizeof(inst.operands[0].lbl), target);
@@ -83,6 +47,7 @@ static void emit_jcc(rane_tir_function_t* func, const char* target) {
 
 static void emit_jcc_ext(rane_tir_function_t* func, rane_tir_cc_t cc, const char* target) {
   rane_tir_inst_t inst;
+  memset(&inst, 0, sizeof(inst));
   inst.opcode = TIR_JCC_EXT;
   inst.type = RANE_TYPE_U64;
   inst.operands[0].kind = TIR_OPERAND_IMM;
@@ -93,16 +58,291 @@ static void emit_jcc_ext(rane_tir_function_t* func, rane_tir_cc_t cc, const char
   func->insts[func->inst_count++] = inst;
 }
 
-static void emit_cmp_r0_imm0(rane_tir_function_t* func) {
+// Local slot map (per-function, bootstrap)
+typedef struct rane_local_s {
+  char name[64];
+  uint32_t slot;
+} rane_local_t;
+
+static rane_local_t g_locals[256];
+static uint32_t g_local_count = 0;
+static uint32_t g_next_slot = 0;
+
+static void locals_reset() {
+  g_local_count = 0;
+  g_next_slot = 0;
+}
+
+static int local_find_slot(const char* name, uint32_t* out_slot) {
+  if (!name) return 0;
+  for (uint32_t i = 0; i < g_local_count; i++) {
+    if (strcmp(g_locals[i].name, name) == 0) {
+      if (out_slot) *out_slot = g_locals[i].slot;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static uint32_t local_get_or_define_slot(const char* name) {
+  uint32_t s = 0;
+  if (local_find_slot(name, &s)) return s;
+  if (g_local_count < 256) {
+    strncpy_s(g_locals[g_local_count].name, sizeof(g_locals[g_local_count].name), name, _TRUNCATE);
+    g_locals[g_local_count].slot = g_next_slot;
+    g_local_count++;
+    return g_next_slot++;
+  }
+  return 0;
+}
+
+static void emit_ld_slot_to_r0(rane_tir_function_t* func, uint32_t slot) {
+  rane_tir_inst_t inst;
+  memset(&inst, 0, sizeof(inst));
+  inst.opcode = TIR_LD;
+  inst.type = RANE_TYPE_U64;
+  inst.operands[0].kind = TIR_OPERAND_R;
+  inst.operands[0].r = 0;
+  inst.operands[1].kind = TIR_OPERAND_S;
+  inst.operands[1].s = slot;
+  inst.operand_count = 2;
+  func->insts[func->inst_count++] = inst;
+}
+
+static void emit_st_r0_to_slot(rane_tir_function_t* func, uint32_t slot) {
+  rane_tir_inst_t inst;
+  memset(&inst, 0, sizeof(inst));
+  inst.opcode = TIR_ST;
+  inst.type = RANE_TYPE_U64;
+  inst.operands[0].kind = TIR_OPERAND_S;
+  inst.operands[0].s = slot;
+  inst.operands[1].kind = TIR_OPERAND_R;
+  inst.operands[1].r = 0;
+  inst.operand_count = 2;
+  func->insts[func->inst_count++] = inst;
+}
+
+static void emit_mov_r0_imm(rane_tir_function_t* func, uint64_t imm, rane_type_e ty) {
+  rane_tir_inst_t inst;
+  memset(&inst, 0, sizeof(inst));
+  inst.opcode = TIR_MOV;
+  inst.type = ty;
+  inst.operands[0].kind = TIR_OPERAND_R;
+  inst.operands[0].r = 0;
+  inst.operands[1].kind = TIR_OPERAND_IMM;
+  inst.operands[1].imm = imm;
+  inst.operand_count = 2;
+  func->insts[func->inst_count++] = inst;
+}
+
+static void emit_cmp_r0_imm(rane_tir_function_t* func, uint64_t imm) {
   rane_tir_inst_t c;
+  memset(&c, 0, sizeof(c));
   c.opcode = TIR_CMP;
   c.type = RANE_TYPE_U64;
   c.operands[0].kind = TIR_OPERAND_R;
   c.operands[0].r = 0;
   c.operands[1].kind = TIR_OPERAND_IMM;
-  c.operands[1].imm = 0;
+  c.operands[1].imm = imm;
   c.operand_count = 2;
   func->insts[func->inst_count++] = c;
+}
+
+static void emit_bool_from_cmp_cc(rane_tir_function_t* func, rane_tir_cc_t cc) {
+  char lbl_true[64];
+  char lbl_false[64];
+  char lbl_end[64];
+  rane_label_gen_make(&g_lbl, lbl_true);
+  rane_label_gen_make(&g_lbl, lbl_false);
+  rane_label_gen_make(&g_lbl, lbl_end);
+
+  emit_jcc_ext(func, cc, lbl_true);
+  emit_jmp(func, lbl_false);
+
+  emit_label(func, lbl_true);
+  emit_mov_r0_imm(func, 1, RANE_TYPE_U64);
+  emit_jmp(func, lbl_end);
+
+  emit_label(func, lbl_false);
+  emit_mov_r0_imm(func, 0, RANE_TYPE_U64);
+  emit_label(func, lbl_end);
+}
+
+// ---- bootstrap proc table (module-level) ----
+typedef struct rane_proc_entry_s {
+  char name[64];
+  const rane_stmt_t* proc_stmt;
+} rane_proc_entry_t;
+
+static rane_proc_entry_t g_procs[128];
+static uint32_t g_proc_count = 0;
+
+static void procs_reset() { g_proc_count = 0; }
+
+static void procs_collect(const rane_stmt_t* st) {
+  if (!st) return;
+  if (st->kind == STMT_BLOCK) {
+    for (uint32_t i = 0; i < st->block.stmt_count; i++) procs_collect(st->block.stmts[i]);
+    return;
+  }
+  if (st->kind == STMT_PROC) {
+    if (g_proc_count < 128) {
+      strncpy_s(g_procs[g_proc_count].name, sizeof(g_procs[g_proc_count].name), st->proc.name, _TRUNCATE);
+      g_procs[g_proc_count].proc_stmt = st;
+      g_proc_count++;
+    }
+    return;
+  }
+}
+
+static const rane_stmt_t* procs_find(const char* name) {
+  if (!name) return NULL;
+  for (uint32_t i = 0; i < g_proc_count; i++) {
+    if (strcmp(g_procs[i].name, name) == 0) return g_procs[i].proc_stmt;
+  }
+  return NULL;
+}
+
+static int stmt_is_proc_def(const rane_stmt_t* st) { return st && st->kind == STMT_PROC; }
+
+static void lower_stmt_to_tir_skip_proc_defs(const rane_stmt_t* st, rane_tir_function_t* func) {
+  if (!st) return;
+  if (stmt_is_proc_def(st)) return;
+  if (st->kind == STMT_BLOCK) {
+    for (uint32_t i = 0; i < st->block.stmt_count; i++) {
+      lower_stmt_to_tir_skip_proc_defs(st->block.stmts[i], func);
+    }
+    return;
+  }
+  lower_stmt_to_tir(st, func);
+}
+
+static void ensure_module_capacity(rane_tir_module_t* m, uint32_t needed) {
+  if (m->max_functions >= needed) return;
+  uint32_t new_cap = m->max_functions ? m->max_functions : 1;
+  while (new_cap < needed) new_cap *= 2;
+  rane_tir_function_t* nf = (rane_tir_function_t*)realloc(m->functions, sizeof(rane_tir_function_t) * new_cap);
+  if (!nf) return;
+  // zero new tail
+  if (new_cap > m->max_functions) {
+    memset(nf + m->max_functions, 0, sizeof(rane_tir_function_t) * (new_cap - m->max_functions));
+  }
+  m->functions = nf;
+  m->max_functions = new_cap;
+}
+
+static rane_tir_function_t* module_add_function(rane_tir_module_t* m, const char* name) {
+  ensure_module_capacity(m, m->function_count + 1);
+  rane_tir_function_t* f = &m->functions[m->function_count++];
+  memset(f, 0, sizeof(*f));
+  strncpy_s(f->name, sizeof(f->name), name, _TRUNCATE);
+  f->insts = (rane_tir_inst_t*)malloc(sizeof(rane_tir_inst_t) * 2048);
+  f->inst_count = 0;
+  f->max_insts = 2048;
+  f->stack_slot_count = 0;
+  return f;
+}
+
+static void emit_call_local(rane_tir_function_t* func, const char* target) {
+  rane_tir_inst_t inst;
+  memset(&inst, 0, sizeof(inst));
+  inst.opcode = TIR_CALL_LOCAL;
+  inst.type = RANE_TYPE_U64;
+  inst.operands[0].kind = TIR_OPERAND_LBL;
+  strcpy_s(inst.operands[0].lbl, sizeof(inst.operands[0].lbl), target);
+  inst.operand_count = 1;
+  func->insts[func->inst_count++] = inst;
+}
+
+// Lowering AST to TIR (module-aware)
+rane_error_t rane_lower_ast_to_tir(const rane_stmt_t* ast_root, rane_tir_module_t* tir_module) {
+  if (!ast_root || !tir_module) return RANE_E_INVALID_ARG;
+
+  memset(tir_module, 0, sizeof(*tir_module));
+  tir_module->functions = NULL;
+  tir_module->function_count = 0;
+  tir_module->max_functions = 0;
+
+  rane_label_gen_init(&g_lbl);
+  procs_reset();
+  procs_collect(ast_root);
+
+  // Emit user procs first.
+  for (uint32_t pi = 0; pi < g_proc_count; pi++) {
+    const rane_stmt_t* p = g_procs[pi].proc_stmt;
+    if (!p) continue;
+
+    rane_tir_function_t* f = module_add_function(tir_module, p->proc.name);
+
+    locals_reset();
+
+    // Map parameters to initial slots (slot0..slotN-1)
+    for (uint32_t i = 0; i < p->proc.param_count; i++) {
+      local_get_or_define_slot(p->proc.params[i]);
+    }
+
+    // Prologue moves: store incoming args (RCX/RDX) to param slots.
+    // Our virtual reg mapping in codegen treats: reg1=RCX, reg2=RDX.
+    for (uint32_t i = 0; i < p->proc.param_count; i++) {
+      uint32_t slot = 0;
+      if (!local_find_slot(p->proc.params[i], &slot)) continue;
+      if (i == 0) {
+        rane_tir_inst_t st;
+        memset(&st, 0, sizeof(st));
+        st.opcode = TIR_ST;
+        st.type = RANE_TYPE_U64;
+        st.operands[0].kind = TIR_OPERAND_S;
+        st.operands[0].s = slot;
+        st.operands[1].kind = TIR_OPERAND_R;
+        st.operands[1].r = 1; // RCX
+        st.operand_count = 2;
+        f->insts[f->inst_count++] = st;
+      } else if (i == 1) {
+        rane_tir_inst_t st;
+        memset(&st, 0, sizeof(st));
+        st.opcode = TIR_ST;
+        st.type = RANE_TYPE_U64;
+        st.operands[0].kind = TIR_OPERAND_S;
+        st.operands[0].s = slot;
+        st.operands[1].kind = TIR_OPERAND_R;
+        st.operands[1].r = 2; // RDX
+        st.operand_count = 2;
+        f->insts[f->inst_count++] = st;
+      }
+    }
+
+    lower_stmt_to_tir(p->proc.body, f);
+
+    // Ensure function ends with RET
+    if (f->inst_count == 0 || (f->insts[f->inst_count - 1].opcode != TIR_RET && f->insts[f->inst_count - 1].opcode != TIR_RET_VAL)) {
+      rane_tir_inst_t ret_inst;
+      memset(&ret_inst, 0, sizeof(ret_inst));
+      ret_inst.opcode = TIR_RET;
+      ret_inst.type = RANE_TYPE_U64;
+      ret_inst.operand_count = 0;
+      f->insts[f->inst_count++] = ret_inst;
+    }
+
+    f->stack_slot_count = g_next_slot;
+  }
+
+  // Emit implicit main wrapper for top-level statements (excluding proc defs).
+  {
+    rane_tir_function_t* mainf = module_add_function(tir_module, "main");
+    locals_reset();
+    lower_stmt_to_tir_skip_proc_defs(ast_root, mainf);
+
+    rane_tir_inst_t ret_inst;
+    memset(&ret_inst, 0, sizeof(ret_inst));
+    ret_inst.opcode = TIR_RET;
+    ret_inst.type = RANE_TYPE_U64;
+    ret_inst.operand_count = 0;
+    mainf->insts[mainf->inst_count++] = ret_inst;
+
+    mainf->stack_slot_count = g_next_slot;
+  }
+
+  return RANE_OK;
 }
 
 static void lower_stmt_to_tir(const rane_stmt_t* st, rane_tir_function_t* func) {
@@ -116,12 +356,24 @@ static void lower_stmt_to_tir(const rane_stmt_t* st, rane_tir_function_t* func) 
   }
 
   if (st->kind == STMT_LET) {
+    uint32_t slot = local_get_or_define_slot(st->let.name);
     lower_expr_to_tir(st->let.expr, func);
+    emit_st_r0_to_slot(func, slot);
     return;
   }
 
   if (st->kind == STMT_ASSIGN) {
+    if (strcmp(st->assign.target, "_") == 0) {
+      lower_expr_to_tir(st->assign.expr, func);
+      return;
+    }
+
+    uint32_t slot = 0;
+    if (!local_find_slot(st->assign.target, &slot)) {
+      slot = local_get_or_define_slot(st->assign.target);
+    }
     lower_expr_to_tir(st->assign.expr, func);
+    emit_st_r0_to_slot(func, slot);
     return;
   }
 
@@ -133,12 +385,11 @@ static void lower_stmt_to_tir(const rane_stmt_t* st, rane_tir_function_t* func) 
     rane_label_gen_make(&g_lbl, lbl_else);
     rane_label_gen_make(&g_lbl, lbl_end);
 
-    // cond in r0
     lower_expr_to_tir(st->if_stmt.cond, func);
-    emit_cmp_r0_imm0(func);
+    emit_cmp_r0_imm(func, 0);
 
-    // if cond != 0 -> then else -> else
-    emit_jcc(func, lbl_then);
+    // true => then
+    emit_jcc_ext(func, TIR_CC_NE, lbl_then);
     emit_jmp(func, lbl_else);
 
     emit_label(func, lbl_then);
@@ -163,8 +414,9 @@ static void lower_stmt_to_tir(const rane_stmt_t* st, rane_tir_function_t* func) 
 
     emit_label(func, lbl_head);
     lower_expr_to_tir(st->while_stmt.cond, func);
-    emit_cmp_r0_imm0(func);
-    emit_jcc(func, lbl_body);
+    emit_cmp_r0_imm(func, 0);
+
+    emit_jcc_ext(func, TIR_CC_NE, lbl_body);
     emit_jmp(func, lbl_end);
 
     emit_label(func, lbl_body);
@@ -185,15 +437,43 @@ static void lower_stmt_to_tir(const rane_stmt_t* st, rane_tir_function_t* func) 
     return;
   }
 
-  // Control flow lowering to real labels/fixups is next step.
+  if (st->kind == STMT_RETURN) {
+    if (st->ret.expr) {
+      lower_expr_to_tir(st->ret.expr, func);
+      rane_tir_inst_t rv;
+      memset(&rv, 0, sizeof(rv));
+      rv.opcode = TIR_RET_VAL;
+      rv.type = RANE_TYPE_U64;
+      rv.operands[0].kind = TIR_OPERAND_R;
+      rv.operands[0].r = 0;
+      rv.operand_count = 1;
+      func->insts[func->inst_count++] = rv;
+    } else {
+      rane_tir_inst_t r;
+      memset(&r, 0, sizeof(r));
+      r.opcode = TIR_RET;
+      r.type = RANE_TYPE_U64;
+      r.operand_count = 0;
+      func->insts[func->inst_count++] = r;
+    }
+    return;
+  }
+
+  // STMT_PROC is not lowered yet (multi-function support is next milestone).
 }
 
 // Helper to lower expression
 static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
   if (!expr) return;
 
+  if (expr->kind == EXPR_LIT_BOOL) {
+    emit_mov_r0_imm(func, (uint64_t)(expr->lit_bool.value ? 1 : 0), RANE_TYPE_U64);
+    return;
+  }
+
   if (expr->kind == EXPR_LIT_INT) {
     rane_tir_inst_t inst;
+    memset(&inst, 0, sizeof(inst));
     inst.opcode = TIR_MOV;
     inst.type = expr->lit_int.type;
     inst.operands[0].kind = TIR_OPERAND_R;
@@ -203,25 +483,40 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
     inst.operand_count = 2;
     func->insts[func->inst_count++] = inst;
     return;
-  } else if (expr->kind == EXPR_CALL) {
+  }
+
+  if (expr->kind == EXPR_VAR) {
+    uint32_t slot = 0;
+    if (!local_find_slot(expr->var.name, &slot)) {
+      // Undefined variable => treat as 0 in codegen; typechecker should have rejected.
+      emit_mov_r0_imm(func, 0, RANE_TYPE_U64);
+      return;
+    }
+    emit_ld_slot_to_r0(func, slot);
+    return;
+  }
+
+  if (expr->kind == EXPR_CALL) {
     // v0 builtin: print(x) -> printf("%s", x)
     if (strcmp(expr->call.name, "print") == 0) {
-      // Arg0: format string (will be patched to .rdata+0 by driver)
+      // Arg0: format string (patched by driver)
       rane_tir_inst_t fmt;
+      memset(&fmt, 0, sizeof(fmt));
       fmt.opcode = TIR_MOV;
       fmt.type = RANE_TYPE_P64;
       fmt.operands[0].kind = TIR_OPERAND_R;
-      fmt.operands[0].r = 0; // reg0
+      fmt.operands[0].r = 0;
       fmt.operands[1].kind = TIR_OPERAND_IMM;
-      fmt.operands[1].imm = 0; // placeholder, patched by driver
+      fmt.operands[1].imm = 0;
       fmt.operand_count = 2;
       func->insts[func->inst_count++] = fmt;
 
       // Arg1: user string
       if (expr->call.arg_count >= 1) {
         lower_expr_to_tir(expr->call.args[0], func);
-        // Move result reg0 -> reg1 (second arg)
+        // Move r0 -> r1 (second arg)
         rane_tir_inst_t mv;
+        memset(&mv, 0, sizeof(mv));
         mv.opcode = TIR_MOV;
         mv.type = RANE_TYPE_P64;
         mv.operands[0].kind = TIR_OPERAND_R;
@@ -233,6 +528,7 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
       }
 
       rane_tir_inst_t call;
+      memset(&call, 0, sizeof(call));
       call.opcode = TIR_CALL_IMPORT;
       call.type = RANE_TYPE_U64;
       call.operands[0].kind = TIR_OPERAND_LBL;
@@ -242,8 +538,44 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
       return;
     }
 
-    // fallback
+    // User-defined proc call?
+    if (procs_find(expr->call.name)) {
+      // Arg0 -> reg1 (RCX), Arg1 -> reg2 (RDX)
+      if (expr->call.arg_count >= 1) {
+        lower_expr_to_tir(expr->call.args[0], func);
+        rane_tir_inst_t mv;
+        memset(&mv, 0, sizeof(mv));
+        mv.opcode = TIR_MOV;
+        mv.type = RANE_TYPE_U64;
+        mv.operands[0].kind = TIR_OPERAND_R;
+        mv.operands[0].r = 1;
+        mv.operands[1].kind = TIR_OPERAND_R;
+        mv.operands[1].r = 0;
+        mv.operand_count = 2;
+        func->insts[func->inst_count++] = mv;
+      }
+      if (expr->call.arg_count >= 2) {
+        lower_expr_to_tir(expr->call.args[1], func);
+        rane_tir_inst_t mv;
+        memset(&mv, 0, sizeof(mv));
+        mv.opcode = TIR_MOV;
+        mv.type = RANE_TYPE_U64;
+        mv.operands[0].kind = TIR_OPERAND_R;
+        mv.operands[0].r = 2;
+        mv.operands[1].kind = TIR_OPERAND_R;
+        mv.operands[1].r = 0;
+        mv.operand_count = 2;
+        func->insts[func->inst_count++] = mv;
+      }
+
+      emit_call_local(func, expr->call.name);
+      // Return value is in reg0 implicitly.
+      return;
+    }
+
+    // Otherwise treat as import
     rane_tir_inst_t call;
+    memset(&call, 0, sizeof(call));
     call.opcode = TIR_CALL_IMPORT;
     call.type = RANE_TYPE_U64;
     call.operands[0].kind = TIR_OPERAND_LBL;
@@ -251,18 +583,51 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
     call.operand_count = 1;
     func->insts[func->inst_count++] = call;
     return;
-  } else if (expr->kind == EXPR_VAR) {
-    // Assume var in reg 1
-    rane_tir_inst_t inst;
-    inst.opcode = TIR_MOV;
-    inst.type = RANE_TYPE_U64;
-    inst.operands[0].kind = TIR_OPERAND_R;
-    inst.operands[0].r = 0;
-    inst.operands[1].kind = TIR_OPERAND_R;
-    inst.operands[1].r = 1;
-    inst.operand_count = 2;
-    func->insts[func->inst_count++] = inst;
-  } else if (expr->kind == EXPR_BINARY) {
+  }
+
+  if (expr->kind == EXPR_BINARY) {
+    // Short-circuit boolean ops using labels and boolean materialization.
+    if (expr->binary.op == BIN_LOGAND || expr->binary.op == BIN_LOGOR) {
+      char lbl_rhs[64];
+      char lbl_false[64];
+      char lbl_true[64];
+      char lbl_end[64];
+      rane_label_gen_make(&g_lbl, lbl_rhs);
+      rane_label_gen_make(&g_lbl, lbl_false);
+      rane_label_gen_make(&g_lbl, lbl_true);
+      rane_label_gen_make(&g_lbl, lbl_end);
+
+      // Evaluate LHS into r0
+      lower_expr_to_tir(expr->binary.left, func);
+      emit_cmp_r0_imm(func, 0);
+
+      if (expr->binary.op == BIN_LOGAND) {
+        // if lhs == 0 -> false else evaluate rhs
+        emit_jcc_ext(func, TIR_CC_E, lbl_false);
+        emit_jmp(func, lbl_rhs);
+      } else {
+        // LOGOR: if lhs != 0 -> true else evaluate rhs
+        emit_jcc_ext(func, TIR_CC_NE, lbl_true);
+        emit_jmp(func, lbl_rhs);
+      }
+
+      emit_label(func, lbl_rhs);
+      lower_expr_to_tir(expr->binary.right, func);
+      emit_cmp_r0_imm(func, 0);
+      // For both, the final value is (rhs != 0)
+      emit_jcc_ext(func, TIR_CC_NE, lbl_true);
+      emit_jmp(func, lbl_false);
+
+      emit_label(func, lbl_true);
+      emit_mov_r0_imm(func, 1, RANE_TYPE_U64);
+      emit_jmp(func, lbl_end);
+
+      emit_label(func, lbl_false);
+      emit_mov_r0_imm(func, 0, RANE_TYPE_U64);
+      emit_label(func, lbl_end);
+      return;
+    }
+
     // Comparisons produce boolean in r0 (0/1)
     if (expr->binary.op == BIN_LT || expr->binary.op == BIN_LE || expr->binary.op == BIN_GT ||
         expr->binary.op == BIN_GE || expr->binary.op == BIN_EQ || expr->binary.op == BIN_NE) {
@@ -271,6 +636,7 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
       // Move left to r2 temp
       {
         rane_tir_inst_t mv;
+        memset(&mv, 0, sizeof(mv));
         mv.opcode = TIR_MOV;
         mv.type = RANE_TYPE_U64;
         mv.operands[0].kind = TIR_OPERAND_R;
@@ -285,6 +651,7 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
       lower_expr_to_tir(expr->binary.right, func);
       {
         rane_tir_inst_t mv;
+        memset(&mv, 0, sizeof(mv));
         mv.opcode = TIR_MOV;
         mv.type = RANE_TYPE_U64;
         mv.operands[0].kind = TIR_OPERAND_R;
@@ -298,6 +665,7 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
       // CMP r2, r1
       {
         rane_tir_inst_t c;
+        memset(&c, 0, sizeof(c));
         c.opcode = TIR_CMP;
         c.type = RANE_TYPE_U64;
         c.operands[0].kind = TIR_OPERAND_R;
@@ -308,67 +676,26 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
         func->insts[func->inst_count++] = c;
       }
 
-      // Materialize boolean with labels (branch-based)
-      char lbl_true[64];
-      char lbl_false[64];
-      char lbl_end[64];
-      rane_label_gen_make(&g_lbl, lbl_true);
-      rane_label_gen_make(&g_lbl, lbl_false);
-      rane_label_gen_make(&g_lbl, lbl_end);
-
-      // Emit conditional branch to lbl_true based on comparison.
-      // For now we re-use TIR_JCC as "jump if condition true" with label string encoding.
-      // Encode opcode name into label prefix is avoided; instead we use marker labels and a side-channel:
-      // bootstrap: treat BIN_NE as JCC(JNE) and BIN_EQ as JCC(JE), others default to JNE.
-      // (x64 codegen below is upgraded to handle these via a new TIR_JCC_EXT form.)
-
-      // Simplified: for EQ/NE only in v0. Others fall back to NE.
-      // true if (r2 != r1)
-      if (expr->binary.op == BIN_EQ) {
-        // false-first JNE -> false; then true
-        emit_jcc(func, lbl_false);
-        emit_jmp(func, lbl_true);
-      } else {
-        // default NE: JCC -> true
-        emit_jcc(func, lbl_true);
-        emit_jmp(func, lbl_false);
+      rane_tir_cc_t cc = TIR_CC_NE;
+      switch (expr->binary.op) {
+        case BIN_EQ: cc = TIR_CC_E; break;
+        case BIN_NE: cc = TIR_CC_NE; break;
+        case BIN_LT: cc = TIR_CC_L; break;
+        case BIN_LE: cc = TIR_CC_LE; break;
+        case BIN_GT: cc = TIR_CC_G; break;
+        case BIN_GE: cc = TIR_CC_GE; break;
+        default: break;
       }
 
-      emit_label(func, lbl_true);
-      {
-        rane_tir_inst_t one;
-        one.opcode = TIR_MOV;
-        one.type = RANE_TYPE_U64;
-        one.operands[0].kind = TIR_OPERAND_R;
-        one.operands[0].r = 0;
-        one.operands[1].kind = TIR_OPERAND_IMM;
-        one.operands[1].imm = 1;
-        one.operand_count = 2;
-        func->insts[func->inst_count++] = one;
-      }
-      emit_jmp(func, lbl_end);
-
-      emit_label(func, lbl_false);
-      {
-        rane_tir_inst_t zero;
-        zero.opcode = TIR_MOV;
-        zero.type = RANE_TYPE_U64;
-        zero.operands[0].kind = TIR_OPERAND_R;
-        zero.operands[0].r = 0;
-        zero.operands[1].kind = TIR_OPERAND_IMM;
-        zero.operands[1].imm = 0;
-        zero.operand_count = 2;
-        func->insts[func->inst_count++] = zero;
-      }
-      emit_label(func, lbl_end);
+      emit_bool_from_cmp_cc(func, cc);
       return;
     }
 
-    // Arithmetic
+    // Arithmetic + bitwise (non-short-circuit)
     lower_expr_to_tir(expr->binary.left, func);
-    // Move left to r1
     {
       rane_tir_inst_t mv;
+      memset(&mv, 0, sizeof(mv));
       mv.opcode = TIR_MOV;
       mv.type = RANE_TYPE_U64;
       mv.operands[0].kind = TIR_OPERAND_R;
@@ -381,12 +708,20 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
     lower_expr_to_tir(expr->binary.right, func);
 
     rane_tir_inst_t inst;
+    memset(&inst, 0, sizeof(inst));
     rane_tir_opcode_t opcode;
     if (expr->binary.op == BIN_ADD) opcode = TIR_ADD;
     else if (expr->binary.op == BIN_SUB) opcode = TIR_SUB;
     else if (expr->binary.op == BIN_MUL) opcode = TIR_MUL;
     else if (expr->binary.op == BIN_DIV) opcode = TIR_DIV;
+    else if (expr->binary.op == BIN_AND) opcode = TIR_AND;
+    else if (expr->binary.op == BIN_OR) opcode = TIR_OR;
+    else if (expr->binary.op == BIN_XOR) opcode = TIR_XOR;
+    else if (expr->binary.op == BIN_SHL) opcode = TIR_SHL;
+    else if (expr->binary.op == BIN_SHR) opcode = TIR_SHR;
+    else if (expr->binary.op == BIN_SAR) opcode = TIR_SAR;
     else opcode = TIR_ADD;
+
     inst.opcode = opcode;
     inst.type = RANE_TYPE_U64;
     inst.operands[0].kind = TIR_OPERAND_R;
@@ -395,6 +730,92 @@ static void lower_expr_to_tir(rane_expr_t* expr, rane_tir_function_t* func) {
     inst.operands[1].r = 1;
     inst.operand_count = 2;
     func->insts[func->inst_count++] = inst;
+    return;
+  }
+
+  if (expr->kind == EXPR_UNARY) {
+    if (!expr->unary.expr) {
+      emit_mov_r0_imm(func, 0, RANE_TYPE_U64);
+      return;
+    }
+
+    switch (expr->unary.op) {
+      case UN_NEG: {
+        // r0 = 0 - (expr)
+        lower_expr_to_tir(expr->unary.expr, func);
+        // move (expr) into r1
+        {
+          rane_tir_inst_t mv;
+          memset(&mv, 0, sizeof(mv));
+          mv.opcode = TIR_MOV;
+          mv.type = RANE_TYPE_U64;
+          mv.operands[0].kind = TIR_OPERAND_R;
+          mv.operands[0].r = 1;
+          mv.operands[1].kind = TIR_OPERAND_R;
+          mv.operands[1].r = 0;
+          mv.operand_count = 2;
+          func->insts[func->inst_count++] = mv;
+        }
+        emit_mov_r0_imm(func, 0, RANE_TYPE_U64);
+        {
+          rane_tir_inst_t sub;
+          memset(&sub, 0, sizeof(sub));
+          sub.opcode = TIR_SUB;
+          sub.type = RANE_TYPE_U64;
+          sub.operands[0].kind = TIR_OPERAND_R;
+          sub.operands[0].r = 0;
+          sub.operands[1].kind = TIR_OPERAND_R;
+          sub.operands[1].r = 1;
+          sub.operand_count = 2;
+          func->insts[func->inst_count++] = sub;
+        }
+        return;
+      }
+
+      case UN_NOT: {
+        // booleanize: r0 = (expr == 0) ? 1 : 0
+        lower_expr_to_tir(expr->unary.expr, func);
+        emit_cmp_r0_imm(func, 0);
+        emit_bool_from_cmp_cc(func, TIR_CC_E);
+        return;
+      }
+
+      case UN_BITNOT: {
+        // r0 = expr ^ 0xFFFF...FFFF
+        lower_expr_to_tir(expr->unary.expr, func);
+        // r1 = ~0
+        {
+          rane_tir_inst_t mv;
+          memset(&mv, 0, sizeof(mv));
+          mv.opcode = TIR_MOV;
+          mv.type = RANE_TYPE_U64;
+          mv.operands[0].kind = TIR_OPERAND_R;
+          mv.operands[0].r = 1;
+          mv.operands[1].kind = TIR_OPERAND_IMM;
+          mv.operands[1].imm = 0xFFFFFFFFFFFFFFFFull;
+          mv.operand_count = 2;
+          func->insts[func->inst_count++] = mv;
+        }
+        {
+          rane_tir_inst_t x;
+          memset(&x, 0, sizeof(x));
+          x.opcode = TIR_XOR;
+          x.type = RANE_TYPE_U64;
+          x.operands[0].kind = TIR_OPERAND_R;
+          x.operands[0].r = 0;
+          x.operands[1].kind = TIR_OPERAND_R;
+          x.operands[1].r = 1;
+          x.operand_count = 2;
+          func->insts[func->inst_count++] = x;
+        }
+        return;
+      }
+
+      default:
+        break;
+    }
+
+    emit_mov_r0_imm(func, 0, RANE_TYPE_U64);
     return;
   }
 }
@@ -406,26 +827,47 @@ rane_error_t rane_codegen_tir_to_x64(const rane_tir_module_t* tir_module, rane_c
   rane_x64_emitter_t emitter;
   rane_x64_init_emitter(&emitter, ctx->code_buffer, ctx->buffer_size);
 
-  // Collect labels and fixups
-  rane_x64_label_map_entry_t labels[512];
+  rane_x64_label_map_entry_t labels[2048];
   uint32_t label_count = 0;
-  rane_x64_fixup_t fixups[512];
+  rane_x64_fixup_t fixups[2048];
   uint32_t fixup_count = 0;
 
-  // Reset exported call fixup list
   if (ctx && ctx->call_fixups) {
     ctx->call_fixup_count = 0;
   }
 
-  if (tir_module->function_count > 0) {
-    const rane_tir_function_t* func = &tir_module->functions[0];
+  auto emit_function = [&](const rane_tir_function_t* func) {
+    if (!func) return;
 
-    // First pass: emit code, record label offsets & fixups
+    // Function entry label
+    if (label_count < 2048) {
+      strcpy_s(labels[label_count].label, sizeof(labels[label_count].label), func->name);
+      labels[label_count].offset = emitter.offset;
+      label_count++;
+    }
+
+    // Prologue + locals
+    {
+      rane_x64_emit_push_reg(&emitter, 5);
+      uint8_t rex = 0x48;
+      uint8_t op = 0x89;
+      uint8_t modrm = 0xE5;
+      rane_x64_emit_bytes(&emitter, &rex, 1);
+      rane_x64_emit_bytes(&emitter, &op, 1);
+      rane_x64_emit_bytes(&emitter, &modrm, 1);
+
+      uint32_t locals_bytes = func->stack_slot_count * 8;
+      uint32_t aligned = (locals_bytes + 15u) & ~15u;
+      if (aligned) {
+        rane_x64_emit_sub_rsp_imm32(&emitter, aligned);
+      }
+    }
+
     for (uint32_t i = 0; i < func->inst_count; i++) {
       const rane_tir_inst_t* inst = &func->insts[i];
 
       if (inst->opcode == TIR_LABEL && inst->operand_count == 1 && inst->operands[0].kind == TIR_OPERAND_LBL) {
-        if (label_count < 512) {
+        if (label_count < 2048) {
           strcpy_s(labels[label_count].label, sizeof(labels[label_count].label), inst->operands[0].lbl);
           labels[label_count].offset = emitter.offset;
           label_count++;
@@ -434,9 +876,8 @@ rane_error_t rane_codegen_tir_to_x64(const rane_tir_module_t* tir_module, rane_c
       }
 
       if (inst->opcode == TIR_JMP && inst->operand_count == 1 && inst->operands[0].kind == TIR_OPERAND_LBL) {
-        // Emit E9 + rel32 placeholder
         rane_x64_emit_jmp_rel32(&emitter, 0);
-        if (fixup_count < 512) {
+        if (fixup_count < 2048) {
           strcpy_s(fixups[fixup_count].label, sizeof(fixups[fixup_count].label), inst->operands[0].lbl);
           fixups[fixup_count].patch_offset = emitter.offset - 4;
           fixups[fixup_count].kind = 1;
@@ -445,15 +886,52 @@ rane_error_t rane_codegen_tir_to_x64(const rane_tir_module_t* tir_module, rane_c
         continue;
       }
 
-      if (inst->opcode == TIR_JCC && inst->operand_count == 1 && inst->operands[0].kind == TIR_OPERAND_LBL) {
-        // Use JNE rel32 for now (cond != 0)
-        rane_x64_emit_jne_rel32(&emitter, 0);
-        if (fixup_count < 512) {
-          strcpy_s(fixups[fixup_count].label, sizeof(fixups[fixup_count].label), inst->operands[0].lbl);
+      if (inst->opcode == TIR_JCC_EXT && inst->operand_count == 2 &&
+          inst->operands[0].kind == TIR_OPERAND_IMM && inst->operands[1].kind == TIR_OPERAND_LBL) {
+        rane_tir_cc_t cc = (rane_tir_cc_t)inst->operands[0].imm;
+        switch (cc) {
+          case TIR_CC_E:  rane_x64_emit_je_rel32(&emitter, 0);  break;
+          case TIR_CC_NE: rane_x64_emit_jne_rel32(&emitter, 0); break;
+          case TIR_CC_L:  rane_x64_emit_jl_rel32(&emitter, 0);  break;
+          case TIR_CC_LE: rane_x64_emit_jle_rel32(&emitter, 0); break;
+          case TIR_CC_G:  rane_x64_emit_jg_rel32(&emitter, 0);  break;
+          case TIR_CC_GE: rane_x64_emit_jge_rel32(&emitter, 0); break;
+          default:        rane_x64_emit_jne_rel32(&emitter, 0); break;
+        }
+        if (fixup_count < 2048) {
+          strcpy_s(fixups[fixup_count].label, sizeof(fixups[fixup_count].label), inst->operands[1].lbl);
           fixups[fixup_count].patch_offset = emitter.offset - 4;
-          fixups[fixup_count].kind = 3;
+          fixups[fixup_count].kind = 2;
           fixup_count++;
         }
+        continue;
+      }
+
+      if (inst->opcode == TIR_CALL_LOCAL && inst->operand_count == 1 && inst->operands[0].kind == TIR_OPERAND_LBL) {
+        // call rel32 placeholder
+        rane_x64_emit_call_rel32(&emitter, 0);
+        if (fixup_count < 2048) {
+          strcpy_s(fixups[fixup_count].label, sizeof(fixups[fixup_count].label), inst->operands[0].lbl);
+          fixups[fixup_count].patch_offset = emitter.offset - 4;
+          fixups[fixup_count].kind = 4; // call
+          fixup_count++;
+        }
+        continue;
+      }
+
+      if (inst->opcode == TIR_LD && inst->operand_count == 2 &&
+          inst->operands[0].kind == TIR_OPERAND_R && inst->operands[1].kind == TIR_OPERAND_S) {
+        // mov r, [rbp - (slot+1)*8]
+        int32_t disp = -(int32_t)((inst->operands[1].s + 1u) * 8u);
+        rane_x64_emit_mov_reg_mem(&emitter, (uint8_t)inst->operands[0].r, 5 /*RBP*/, disp);
+        continue;
+      }
+
+      if (inst->opcode == TIR_ST && inst->operand_count == 2 &&
+          inst->operands[0].kind == TIR_OPERAND_S && inst->operands[1].kind == TIR_OPERAND_R) {
+        // mov [rbp - (slot+1)*8], r
+        int32_t disp = -(int32_t)((inst->operands[0].s + 1u) * 8u);
+        rane_x64_emit_mov_mem_reg(&emitter, 5 /*RBP*/, disp, (uint8_t)inst->operands[1].r);
         continue;
       }
 
@@ -502,8 +980,42 @@ rane_error_t rane_codegen_tir_to_x64(const rane_tir_module_t* tir_module, rane_c
         continue;
       }
 
+      if (inst->opcode == TIR_XOR && inst->operand_count == 2 &&
+          inst->operands[0].kind == TIR_OPERAND_R && inst->operands[1].kind == TIR_OPERAND_R) {
+        rane_x64_emit_xor_reg_reg(&emitter, (uint8_t)inst->operands[0].r, (uint8_t)inst->operands[1].r);
+        continue;
+      }
+
+      if (inst->opcode == TIR_AND && inst->operand_count == 2 &&
+          inst->operands[0].kind == TIR_OPERAND_R && inst->operands[1].kind == TIR_OPERAND_R) {
+        rane_x64_emit_and_reg_reg(&emitter, (uint8_t)inst->operands[0].r, (uint8_t)inst->operands[1].r);
+        continue;
+      }
+
+      if (inst->opcode == TIR_OR && inst->operand_count == 2 &&
+          inst->operands[0].kind == TIR_OPERAND_R && inst->operands[1].kind == TIR_OPERAND_R) {
+        rane_x64_emit_or_reg_reg(&emitter, (uint8_t)inst->operands[0].r, (uint8_t)inst->operands[1].r);
+        continue;
+      }
+
+      if ((inst->opcode == TIR_SHL || inst->opcode == TIR_SHR || inst->opcode == TIR_SAR) && inst->operand_count == 2 &&
+          inst->operands[0].kind == TIR_OPERAND_R && inst->operands[1].kind == TIR_OPERAND_R) {
+        // x64 variable shifts use CL as the count.
+        // Move count reg -> RCX (so CL is set) if needed.
+        if (inst->operands[1].r != 1) {
+          rane_x64_emit_mov_reg_reg(&emitter, 1 /*RCX*/, (uint8_t)inst->operands[1].r);
+        }
+
+        uint8_t dst = (uint8_t)inst->operands[0].r;
+        if (inst->opcode == TIR_SHL) rane_x64_emit_shl_reg_cl(&emitter, dst);
+        else if (inst->opcode == TIR_SHR) rane_x64_emit_shr_reg_cl(&emitter, dst);
+        else rane_x64_emit_sar_reg_cl(&emitter, dst);
+        continue;
+      }
+
       if (inst->opcode == TIR_CALL_IMPORT && inst->operand_count == 1 && inst->operands[0].kind == TIR_OPERAND_LBL) {
-        // Win64: RCX=arg0, RDX=arg1
+        // Win64: RCX=arg0, RDX=arg1 (virtual regs 1 and 2)
+        // Our lowering already put args in reg1/reg2 for local calls; for imports we keep existing behavior.
         rane_x64_emit_mov_reg_reg(&emitter, 1 /*RCX*/, 0 /*RAX*/);
         rane_x64_emit_mov_reg_reg(&emitter, 2 /*RDX*/, 1 /*RCX*/);
 
@@ -511,7 +1023,6 @@ rane_error_t rane_codegen_tir_to_x64(const rane_tir_module_t* tir_module, rane_c
         uint8_t placeholder[9] = { 0xE8, 0, 0, 0, 0, 0x90, 0x90, 0x90, 0x90 };
         rane_x64_emit_bytes(&emitter, placeholder, sizeof(placeholder));
 
-        // Export fixup to caller if requested
         if (ctx && ctx->call_fixups && ctx->call_fixup_count < ctx->call_fixup_capacity) {
           rane_aot_call_fixup_t* fixups_out = (rane_aot_call_fixup_t*)ctx->call_fixups;
           rane_aot_call_fixup_t* f = &fixups_out[ctx->call_fixup_count++];
@@ -520,22 +1031,61 @@ rane_error_t rane_codegen_tir_to_x64(const rane_tir_module_t* tir_module, rane_c
         }
         continue;
       }
+
+      if (inst->opcode == TIR_RET_VAL) {
+        if (inst->operand_count == 1 && inst->operands[0].kind == TIR_OPERAND_R) {
+          if (inst->operands[0].r != 0) {
+            rane_x64_emit_mov_reg_reg(&emitter, 0 /*RAX*/, (uint8_t)inst->operands[0].r);
+          }
+        }
+      }
+
+      if (inst->opcode == TIR_RET || inst->opcode == TIR_RET_VAL) {
+        uint32_t locals_bytes = func->stack_slot_count * 8;
+        uint32_t aligned = (locals_bytes + 15u) & ~15u;
+        if (aligned) {
+          rane_x64_emit_add_rsp_imm32(&emitter, aligned);
+        }
+        uint8_t rex = 0x48;
+        uint8_t op = 0x89;
+        uint8_t modrm = 0xEC;
+        rane_x64_emit_bytes(&emitter, &rex, 1);
+        rane_x64_emit_bytes(&emitter, &op, 1);
+        rane_x64_emit_bytes(&emitter, &modrm, 1);
+        rane_x64_emit_pop_reg(&emitter, 5);
+        rane_x64_emit_ret(&emitter);
+        continue;
+      }
+    }
+  };
+
+  // Emit main first if present
+  const rane_tir_function_t* mainf = NULL;
+  for (uint32_t i = 0; i < tir_module->function_count; i++) {
+    if (strcmp(tir_module->functions[i].name, "main") == 0) {
+      mainf = &tir_module->functions[i];
+      break;
     }
   }
+  if (mainf) emit_function(mainf);
 
-  // Second pass: patch rel32
+  for (uint32_t i = 0; i < tir_module->function_count; i++) {
+    const rane_tir_function_t* f = &tir_module->functions[i];
+    if (mainf && f == mainf) continue;
+    emit_function(f);
+  }
+
+  // Patch rel32 (jmp/jcc/call-local)
   for (uint32_t fi = 0; fi < fixup_count; fi++) {
     uint64_t target_off = 0;
     if (!find_label_offset(labels, label_count, fixups[fi].label, &target_off)) continue;
 
-    // rel32 is relative to next instruction after rel32 immediate
     uint64_t patch_off = fixups[fi].patch_offset;
     uint64_t next_ip = patch_off + 4;
     int32_t rel = (int32_t)((int64_t)target_off - (int64_t)next_ip);
     memcpy(emitter.buffer + patch_off, &rel, 4);
   }
 
-  // Finished
   ctx->code_size = emitter.offset;
   return RANE_OK;
 }

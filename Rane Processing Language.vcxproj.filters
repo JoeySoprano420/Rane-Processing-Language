@@ -189,5 +189,6 @@
     <None Include="history.md" />
     <None Include="breakdown.md" />
     <None Include="hello.rane" />
+    <None Include="about.md" />
   </ItemGroup>
 </Project>

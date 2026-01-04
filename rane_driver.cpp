@@ -62,7 +62,8 @@ typedef struct {
   uint16_t e_ip;
   uint16_t e_cs;
   uint16_t e_lfarlc;
-  uint16_t e_ovno;
+  uint16_t e_ovn;
+
   uint16_t e_res[4];
   uint16_t e_oemid;
   uint16_t e_oeminfo;
@@ -262,6 +263,73 @@ static rane_error_t rane_write_pe64_exe_with_printf(
   return e;
 }
 
+typedef struct rane_string_patch_s {
+  uint32_t code_imm_off; // offset of imm64 in code buffer
+  uint64_t heap_ptr;     // original heap pointer from parser
+} rane_string_patch_t;
+
+static int collect_string_patches_from_tir(const rane_tir_module_t* mod, rane_string_patch_t* out, uint32_t cap, uint32_t* out_count) {
+  if (out_count) *out_count = 0;
+  if (!mod || !out || cap == 0) return 0;
+
+  uint32_t n = 0;
+  for (uint32_t fi = 0; fi < mod->function_count; fi++) {
+    const rane_tir_function_t* f = &mod->functions[fi];
+    for (uint32_t ii = 0; ii < f->inst_count; ii++) {
+      const rane_tir_inst_t* inst = &f->insts[ii];
+      if (inst->opcode != TIR_MOV) continue;
+      if (inst->operand_count != 2) continue;
+      if (inst->operands[0].kind != TIR_OPERAND_R) continue;
+      if (inst->operands[1].kind != TIR_OPERAND_IMM) continue;
+      if (inst->type != RANE_TYPE_P64) continue;
+
+      // Heuristic: string literals are heap C-strings created by parser.
+      uint64_t p = inst->operands[1].imm;
+      const char* s = (const char*)(uintptr_t)p;
+      if (!s) continue;
+
+      // Accept printable / at least NUL-terminated.
+      size_t len = strlen(s);
+      if (len == 0) continue;
+
+      // Find imm64 occurrences of this pointer in the generated code and patch them.
+      // Codegen for MOV reg, imm64 is: REX.W + (B8+reg) + imm64, so imm starts at +2.
+      // We'll scan the final code later; here we just remember the pointer.
+      // We'll fill code_imm_off in a second scan of code bytes.
+      if (n < cap) {
+        out[n].code_imm_off = 0;
+        out[n].heap_ptr = p;
+        n++;
+      }
+    }
+  }
+
+  if (out_count) *out_count = n;
+  return 1;
+}
+
+static uint32_t scan_code_for_mov_imm64(uint8_t* code, uint32_t code_size, uint64_t imm, uint32_t* out_imm_offs, uint32_t cap) {
+  if (!code || !out_imm_offs || cap == 0) return 0;
+  uint32_t found = 0;
+
+  // Pattern: 48 B8+rd imm64
+  for (uint32_t i = 0; i + 10 <= code_size; i++) {
+    if (code[i] != 0x48) continue;
+    uint8_t op = code[i + 1];
+    if (op < 0xB8 || op > 0xBF) continue;
+
+    uint64_t v = 0;
+    memcpy(&v, code + i + 2, 8);
+    if (v != imm) continue;
+
+    uint32_t imm_off = i + 2;
+    if (found < cap) out_imm_offs[found] = imm_off;
+    found++;
+  }
+
+  return found;
+}
+
 rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   if (!opts || !opts->input_path || !opts->output_path) return RANE_E_INVALID_ARG;
 
@@ -282,7 +350,10 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
 
   rane_build_ssa(&tir_mod);
   rane_allocate_registers(&tir_mod);
-  rane_optimize_tir(&tir_mod);
+
+  // Optimize according to requested level
+  err = rane_optimize_tir_with_level(&tir_mod, opts->opt_level);
+  if (err != RANE_OK) { free(src); return err; }
 
   // AOT compile to raw code bytes
   void* code = NULL;
@@ -293,19 +364,89 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   code = aot.code;
   code_size = aot.code_size;
 
-  // v0 string table: if the program contains exactly one string literal stored in MOV reg, imm,
-  // we place it into .rdata as a null-terminated C string and patch the imm64.
-  // (This will be generalized later.)
-  const uint32_t image_base_low = 0x40000000u; // low 32bits unused; keep 64-bit base below
-  (void)image_base_low;
-
+  // --- v0/v1 .rdata: format string + pooled user strings, patch MOV imm64s ---
   const uint64_t image_base = 0x0000000140000000ULL;
   const uint32_t rdata_rva = 0x2000;
   const uint64_t rdata_va = image_base + rdata_rva;
 
-  // Build .rdata
   const char* fmt = "%s";
   const size_t fmt_len = strlen(fmt) + 1;
+
+  // Collect string pointers from the lowered TIR
+  rane_string_patch_t str_patches[256];
+  uint32_t str_patch_count = 0;
+  collect_string_patches_from_tir(&tir_mod, str_patches, 256, &str_patch_count);
+
+  // Build unique string list (by pointer identity)
+  uint64_t uniq_ptrs[256];
+  uint32_t uniq_count = 0;
+  for (uint32_t i = 0; i < str_patch_count; i++) {
+    uint64_t p = str_patches[i].heap_ptr;
+    int seen = 0;
+    for (uint32_t j = 0; j < uniq_count; j++) {
+      if (uniq_ptrs[j] == p) { seen = 1; break; }
+    }
+    if (!seen && uniq_count < 256) uniq_ptrs[uniq_count++] = p;
+  }
+
+  // Layout: [fmt][pad8][str0][pad8]...[strN]
+  uint32_t rdata_size = (uint32_t)fmt_len;
+  rdata_size = align_up_u32(rdata_size, 8);
+
+  uint32_t str_offs[256];
+  memset(str_offs, 0, sizeof(str_offs));
+  for (uint32_t i = 0; i < uniq_count; i++) {
+    const char* s = (const char*)(uintptr_t)uniq_ptrs[i];
+    uint32_t off = rdata_size;
+    str_offs[i] = off;
+    uint32_t sz = (uint32_t)(strlen(s) + 1);
+    rdata_size += sz;
+    rdata_size = align_up_u32(rdata_size, 8);
+  }
+
+  uint8_t* rdata = (uint8_t*)calloc(1, rdata_size);
+  if (!rdata) { free(aot.call_fixups); free(code); free(src); return RANE_E_OS_API_FAIL; }
+
+  memcpy(rdata, fmt, fmt_len);
+  // strings
+  for (uint32_t i = 0; i < uniq_count; i++) {
+    const char* s = (const char*)(uintptr_t)uniq_ptrs[i];
+    memcpy(rdata + str_offs[i], s, strlen(s) + 1);
+  }
+
+  // Patch all MOV imm64 uses of heap string pointers to their final .rdata VA
+  uint8_t* c = (uint8_t*)code;
+  for (uint32_t i = 0; i < uniq_count; i++) {
+    uint64_t heap_p = uniq_ptrs[i];
+    uint64_t va = rdata_va + (uint64_t)str_offs[i];
+
+    uint32_t occ[256];
+    uint32_t occ_count = scan_code_for_mov_imm64(c, (uint32_t)code_size, heap_p, occ, 256);
+    uint32_t lim = occ_count;
+    if (lim > 256) lim = 256;
+    for (uint32_t k = 0; k < lim; k++) {
+      uint32_t imm_off = occ[k];
+      if (imm_off + 8 <= code_size) {
+        memcpy(c + imm_off, &va, 8);
+      }
+    }
+  }
+
+  // Also patch print()'s format-string immediate (lowering uses imm=0 sentinel)
+  {
+    uint64_t zero64 = 0;
+    uint64_t fmt_va = rdata_va + 0;
+    uint32_t occ[256];
+    uint32_t occ_count = scan_code_for_mov_imm64(c, (uint32_t)code_size, zero64, occ, 256);
+    uint32_t lim = occ_count;
+    if (lim > 256) lim = 256;
+    for (uint32_t k = 0; k < lim; k++) {
+      uint32_t imm_off = occ[k];
+      if (imm_off + 8 <= code_size) {
+        memcpy(c + imm_off, &fmt_va, 8);
+      }
+    }
+  }
 
   // --- import patch address (msvcrt!printf IAT) based on our fixed PE layout ---
   // Must match `rane_write_pe64_exe_with_printf` layout.
@@ -318,26 +459,6 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   uint32_t ilt_off = align_up_u32(dllname_off + (uint32_t)strlen(dll) + 1, 8);
   uint32_t iat_off = ilt_off + ilt_count * thunk_size;
   const uint64_t iat_va = image_base + idata_rva + iat_off;
-
-  // Extract the heap string pointer from the AST (created by parser)
-  const char* user_str = NULL;
-  if (ast && ast->kind == STMT_LET && ast->let.expr && ast->let.expr->kind == EXPR_LIT_INT && ast->let.expr->lit_int.type == RANE_TYPE_P64) {
-    user_str = (const char*)(uintptr_t)ast->let.expr->lit_int.value;
-  } else if (ast && ast->kind == STMT_ASSIGN && ast->assign.expr && ast->assign.expr->kind == EXPR_CALL && ast->assign.expr->call.arg_count >= 1) {
-    rane_expr_t* a0 = ast->assign.expr->call.args[0];
-    if (a0 && a0->kind == EXPR_LIT_INT && a0->lit_int.type == RANE_TYPE_P64) user_str = (const char*)(uintptr_t)a0->lit_int.value;
-  }
-  if (!user_str) user_str = "";
-
-  const size_t user_len = strlen(user_str) + 1;
-  const uint32_t off_fmt = 0;
-  const uint32_t off_user = (uint32_t)align_up_u32((uint32_t)fmt_len, 8);
-  const uint32_t rdata_size = (uint32_t)(off_user + user_len);
-
-  uint8_t* rdata = (uint8_t*)calloc(1, rdata_size);
-  if (!rdata) { free(code); free(src); return RANE_E_OS_API_FAIL; }
-  memcpy(rdata + off_fmt, fmt, fmt_len);
-  memcpy(rdata + off_user, user_str, user_len);
 
   // Patch calls using fixups (required)
   if (aot.call_fixup_count == 0 || !aot.call_fixups) {
@@ -353,7 +474,6 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
     if (off + 9 > code_size) continue;
 
     // Overwrite placeholder with: 48 8B 05 disp32 ; FF D0
-    uint8_t* c = (uint8_t*)code;
     c[off + 0] = 0x48;
     c[off + 1] = 0x8B;
     c[off + 2] = 0x05;

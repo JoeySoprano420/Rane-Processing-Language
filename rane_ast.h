@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "rane_diag.h"
+
 // ---------------------------
 // RANE Types
 // ---------------------------
@@ -16,7 +18,8 @@ typedef enum rane_type_e {
   RANE_TYPE_I32,
   RANE_TYPE_I64,
   RANE_TYPE_P64,
-  RANE_TYPE_B1
+  RANE_TYPE_B1,
+  RANE_TYPE_STRING
 } rane_type_e;
 
 // ---------------------------
@@ -95,7 +98,9 @@ typedef enum rane_stmt_kind_e {
   STMT_MMIO_REGION_DECL,
   STMT_MEM_COPY,
   STMT_IF,
-  STMT_WHILE
+  STMT_WHILE,
+  STMT_PROC,
+  STMT_RETURN
 } rane_stmt_kind_e;
 
 // ---------------------------
@@ -110,6 +115,7 @@ typedef struct rane_stmt_s rane_stmt_t;
 // ---------------------------
 
 struct rane_expr_s {
+  rane_span_t span;
   rane_expr_kind_e kind;
   union {
     struct {
@@ -169,6 +175,7 @@ struct rane_expr_s {
 // ---------------------------
 
 struct rane_stmt_s {
+  rane_span_t span;
   rane_stmt_kind_e kind;
   union {
     struct {
@@ -263,5 +270,14 @@ struct rane_stmt_s {
       rane_expr_t* cond;
       rane_stmt_t* body;
     } while_stmt;
+    struct {
+      char name[64];
+      char** params;
+      uint32_t param_count;
+      rane_stmt_t* body; // block
+    } proc;
+    struct {
+      rane_expr_t* expr; // may be NULL for bare return
+    } ret;
   };
 };

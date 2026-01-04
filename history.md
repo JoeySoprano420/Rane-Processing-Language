@@ -17,6 +17,10 @@ This file tracks notable milestones for the codebase in this repository.
 - Removed heuristic “patch the first call” behavior.
 - Added import call-site fixups recorded during codegen and returned via AOT compilation so the driver can patch imported calls deterministically.
 
+### Expression operator coverage
+- Added shift operators (word-form) `shl`, `shr`, `sar` end-to-end (lexer/parser ? TIR ? x64).
+- Added operator keywords `xor` (infix) and `not` (unary) to match the token set.
+
 ### Loader demo stability
 - The in-process demo uses a strict band-reserving loader prototype.
 - Updated demo layout defaults to provide valid band base/size values so `rane_loader_init` does not fail due to missing layout fields.

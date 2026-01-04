@@ -175,10 +175,9 @@ rane_error_t rane_x64_emit_module(rane_x64_emitter_t* e, const rane_tir_module_t
 
 rane_error_t rane_x64_codegen_tir_to_machine(const rane_tir_module_t* mod, uint8_t** out_code) { *out_code = NULL; return RANE_OK; }
 
-static void rane_x64_emit_push_reg(rane_x64_emitter_t* e, uint8_t reg) {
-  // push r64: 0x50 + reg (only for low regs)
+// push r64: 0x50 + reg (low regs) + optional REX for r8-r15
+void rane_x64_emit_push_reg(rane_x64_emitter_t* e, uint8_t reg) {
   uint8_t op = (uint8_t)(0x50 + reg_code(reg));
-  // REX for r8-r15
   if (reg >= 8) {
     uint8_t rex = 0x41; // REX.B
     rane_x64_emit_bytes(e, &rex, 1);
@@ -186,13 +185,35 @@ static void rane_x64_emit_push_reg(rane_x64_emitter_t* e, uint8_t reg) {
   rane_x64_emit_bytes(e, &op, 1);
 }
 
-static void rane_x64_emit_pop_reg(rane_x64_emitter_t* e, uint8_t reg) {
+void rane_x64_emit_pop_reg(rane_x64_emitter_t* e, uint8_t reg) {
   uint8_t op = (uint8_t)(0x58 + reg_code(reg));
   if (reg >= 8) {
     uint8_t rex = 0x41;
     rane_x64_emit_bytes(e, &rex, 1);
   }
   rane_x64_emit_bytes(e, &op, 1);
+}
+
+void rane_x64_emit_sub_rsp_imm32(rane_x64_emitter_t* e, uint32_t imm) {
+  // sub rsp, imm32 => 48 81 EC imm32
+  uint8_t rex = 0x48;
+  uint8_t op = 0x81;
+  uint8_t modrm = 0xEC;
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&imm, 4);
+}
+
+void rane_x64_emit_add_rsp_imm32(rane_x64_emitter_t* e, uint32_t imm) {
+  // add rsp, imm32 => 48 81 C4 imm32
+  uint8_t rex = 0x48;
+  uint8_t op = 0x81;
+  uint8_t modrm = 0xC4;
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&imm, 4);
 }
 
 static void rane_x64_emit_mov_rax_imm64(rane_x64_emitter_t* e, uint64_t imm) {
@@ -264,5 +285,62 @@ void rane_x64_emit_jge_rel32(rane_x64_emitter_t* e, int32_t rel) {
   rane_x64_emit_bytes(e, &opcode1, 1);
   rane_x64_emit_bytes(e, &opcode2, 1);
   rane_x64_emit_bytes(e, (uint8_t*)&rel, 4);
+}
+
+void rane_x64_emit_xor_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t rex = rex_w_rm(src_reg, dst_reg);
+  uint8_t opcode = 0x31; // XOR r/m64, r64
+  uint8_t modrm_val = modrm_byte(0x3, reg_code(src_reg), reg_code(dst_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &opcode, 1);
+  rane_x64_emit_bytes(e, &modrm_val, 1);
+}
+
+void rane_x64_emit_and_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t rex = rex_w_rm(src_reg, dst_reg);
+  uint8_t opcode = 0x21; // AND r/m64, r64
+  uint8_t modrm_val = modrm_byte(0x3, reg_code(src_reg), reg_code(dst_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &opcode, 1);
+  rane_x64_emit_bytes(e, &modrm_val, 1);
+}
+
+void rane_x64_emit_or_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t rex = rex_w_rm(src_reg, dst_reg);
+  uint8_t opcode = 0x09; // OR r/m64, r64
+  uint8_t modrm_val = modrm_byte(0x3, reg_code(src_reg), reg_code(dst_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &opcode, 1);
+  rane_x64_emit_bytes(e, &modrm_val, 1);
+}
+
+void rane_x64_emit_shl_reg_cl(rane_x64_emitter_t* e, uint8_t reg) {
+  // 48 D3 /4 : shl r/m64, cl
+  uint8_t rex = rex_w_r(reg);
+  uint8_t op = 0xD3;
+  uint8_t modrm = modrm_byte(0x3, 0x4, reg_code(reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+void rane_x64_emit_shr_reg_cl(rane_x64_emitter_t* e, uint8_t reg) {
+  // 48 D3 /5 : shr r/m64, cl
+  uint8_t rex = rex_w_r(reg);
+  uint8_t op = 0xD3;
+  uint8_t modrm = modrm_byte(0x3, 0x5, reg_code(reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+void rane_x64_emit_sar_reg_cl(rane_x64_emitter_t* e, uint8_t reg) {
+  // 48 D3 /7 : sar r/m64, cl
+  uint8_t rex = rex_w_r(reg);
+  uint8_t op = 0xD3;
+  uint8_t modrm = modrm_byte(0x3, 0x7, reg_code(reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
 }
 

@@ -176,6 +176,9 @@ typedef struct rane_tir_function_s {
   rane_tir_inst_t* insts;
   uint32_t inst_count;
   uint32_t max_insts; // for dynamic array
+
+  // Stack frame info (bootstrap)
+  uint32_t stack_slot_count; // number of 8-byte stack slots used by this function
 } rane_tir_function_t;
 
 typedef struct rane_tir_module_s {

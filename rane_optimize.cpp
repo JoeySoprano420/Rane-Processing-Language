@@ -256,16 +256,29 @@ rane_error_t rane_opt_level_Oz(rane_tir_module_t* mod) { return rane_opt_level_O
 rane_error_t rane_opt_lto(rane_tir_module_t* mod) { return RANE_OK; }
 rane_error_t rane_opt_march_native(rane_tir_module_t* mod) { return RANE_OK; }
 
-rane_error_t rane_optimize_tir(rane_tir_module_t* tir_module) {
+rane_error_t rane_optimize_tir_with_level(rane_tir_module_t* tir_module, int opt_level) {
   if (!tir_module) return RANE_E_INVALID_ARG;
 
-  // Simple, real pipeline
-  rane_opt_level_O2(tir_module);
+  int lvl = opt_level;
+  if (lvl < 0) lvl = 0;
+  if (lvl > 3) lvl = 3;
 
-  // Value propagation placeholder (local)
+  switch (lvl) {
+    case 0: rane_opt_level_O0(tir_module); break;
+    case 1: rane_opt_level_O1(tir_module); break;
+    case 2: rane_opt_level_O2(tir_module); break;
+    case 3: rane_opt_level_O3(tir_module); break;
+    default: rane_opt_level_O2(tir_module); break;
+  }
+
   for (uint32_t fi = 0; fi < tir_module->function_count; fi++) {
     constant_propagation_simple(&tir_module->functions[fi]);
   }
 
   return RANE_OK;
+}
+
+rane_error_t rane_optimize_tir(rane_tir_module_t* tir_module) {
+  // Preserve prior behavior: default to O2
+  return rane_optimize_tir_with_level(tir_module, 2);
 }

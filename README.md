@@ -21,6 +21,9 @@ This project is in active development and many advanced features described in ol
 - `if` lowering that always generates a valid `else` flow.
 - `while` loops.
 - Comparison operators (`< <= > >= == !=`) lowered to a boolean `0/1` value.
+- Bitwise operators: `& | ^`, plus word-form `xor`.
+- Unary boolean `not`.
+- Shift operators (word-form): `shl`, `shr`, `sar`.
 
 ### Toolchain
 - Lexer / parser / type checker.
@@ -51,31 +54,4 @@ From the built executable:
 
 - `Rane Processing Language.exe input.rane -o output.exe -O2`
 
-Optimization flags currently parsed: `-O0 -O1 -O2 -O3` (the pipeline is still evolving).
-
-### Example
-
-`hello.rane`
-
-```
-let msg = "Hello, RANE!";
-print(msg);
-```
-
-## Repository Layout (high level)
-
-- `rane_lexer.*` / `rane_parser.*` / `rane_typecheck.*`: frontend
-- `rane_tir.*`: Typed IR + lowering + codegen driver
-- `rane_x64.*`: minimal x64 emitter
-- `rane_aot.*`: AOT compile APIs (including exported call fixups)
-- `rane_driver.*`: compiles `.rane` to a PE executable
-- `rane_loader_impl.*`: strict band-reserving loader prototype (demo path)
-
-## Contributing
-
-- Keep changes minimal and C++14-compatible.
-- Prefer adding small tests / sample `.rane` programs when changing lowering/codegen.
-
-## License
-
-MIT (see `LICENSE` if present in the repo).
+Optimization flags currently parsed: `-O0 -O1 -O2 -O3`.

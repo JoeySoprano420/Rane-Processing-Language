@@ -45,6 +45,16 @@ void rane_x64_emit_ret(rane_x64_emitter_t* e);
 void rane_x64_emit_mul_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg);
 void rane_x64_emit_div_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg);
 void rane_x64_emit_cmp_reg_imm(rane_x64_emitter_t* e, uint8_t reg, uint64_t imm);
+void rane_x64_emit_sub_rsp_imm32(rane_x64_emitter_t* e, uint32_t imm);
+void rane_x64_emit_add_rsp_imm32(rane_x64_emitter_t* e, uint32_t imm);
+void rane_x64_emit_push_reg(rane_x64_emitter_t* e, uint8_t reg);
+void rane_x64_emit_pop_reg(rane_x64_emitter_t* e, uint8_t reg);
+void rane_x64_emit_xor_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg);
+void rane_x64_emit_and_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg);
+void rane_x64_emit_or_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg);
+void rane_x64_emit_shl_reg_cl(rane_x64_emitter_t* e, uint8_t reg);
+void rane_x64_emit_shr_reg_cl(rane_x64_emitter_t* e, uint8_t reg);
+void rane_x64_emit_sar_reg_cl(rane_x64_emitter_t* e, uint8_t reg);
 
 // High-level: emit TIR instruction
 void rane_x64_emit_tir_inst(rane_x64_emitter_t* e, const rane_tir_inst_t* inst, uint64_t* label_offsets);

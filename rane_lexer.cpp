@@ -80,21 +80,37 @@ static rane_token_type_t check_keyword(rane_lexer_t* lex, size_t start, size_t l
 static rane_token_type_t identifier_type(rane_lexer_t* lex, size_t start, size_t len) {
   // Simple keyword check
   switch (len) {
-    case 2: if (memcmp(lex->source + start, "if", 2) == 0) return TOK_KW_IF;
-            if (memcmp(lex->source + start, "do", 2) == 0) return TOK_KW_DO;
-            break;
-    case 3: if (memcmp(lex->source + start, "let", 3) == 0) return TOK_KW_LET;
-            break;
-    case 4: if (memcmp(lex->source + start, "then", 4) == 0) return TOK_KW_THEN;
-            if (memcmp(lex->source + start, "else", 4) == 0) return TOK_KW_ELSE;
-            if (memcmp(lex->source + start, "jump", 4) == 0) return TOK_KW_JUMP;
-            if (memcmp(lex->source + start, "mark", 4) == 0) return TOK_KW_MARK;
-            break;
-    case 5: if (memcmp(lex->source + start, "while", 5) == 0) return TOK_KW_WHILE;
-            break;
-    case 6: if (memcmp(lex->source + start, "return", 6) == 0) return TOK_KW_RETURN;
-            break;
-    // Add more as needed
+    case 2:
+      if (memcmp(lex->source + start, "if", 2) == 0) return TOK_KW_IF;
+      if (memcmp(lex->source + start, "do", 2) == 0) return TOK_KW_DO;
+      if (memcmp(lex->source + start, "or", 2) == 0) return TOK_KW_OR;
+      break;
+    case 3:
+      if (memcmp(lex->source + start, "let", 3) == 0) return TOK_KW_LET;
+      if (memcmp(lex->source + start, "and", 3) == 0) return TOK_KW_AND;
+      if (memcmp(lex->source + start, "xor", 3) == 0) return TOK_KW_XOR;
+      if (memcmp(lex->source + start, "not", 3) == 0) return TOK_KW_NOT;
+      if (memcmp(lex->source + start, "shl", 3) == 0) return TOK_KW_SHL;
+      if (memcmp(lex->source + start, "shr", 3) == 0) return TOK_KW_SHR;
+      if (memcmp(lex->source + start, "sar", 3) == 0) return TOK_KW_SAR;
+      break;
+    case 4:
+      if (memcmp(lex->source + start, "then", 4) == 0) return TOK_KW_THEN;
+      if (memcmp(lex->source + start, "else", 4) == 0) return TOK_KW_ELSE;
+      if (memcmp(lex->source + start, "jump", 4) == 0) return TOK_KW_JUMP;
+      if (memcmp(lex->source + start, "mark", 4) == 0) return TOK_KW_MARK;
+      if (memcmp(lex->source + start, "proc", 4) == 0) return TOK_KW_DEF;
+      if (memcmp(lex->source + start, "true", 4) == 0) return TOK_BOOL_LITERAL;
+      break;
+    case 5:
+      if (memcmp(lex->source + start, "while", 5) == 0) return TOK_KW_WHILE;
+      if (memcmp(lex->source + start, "false", 5) == 0) return TOK_BOOL_LITERAL;
+      break;
+    case 6:
+      if (memcmp(lex->source + start, "return", 6) == 0) return TOK_KW_RETURN;
+      break;
+    default:
+      break;
   }
   return TOK_IDENTIFIER;
 }

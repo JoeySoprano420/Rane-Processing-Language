@@ -13,10 +13,18 @@ The current focus is a small end-to-end pipeline that compiles a `.rane` source 
 - Lexer / parser building an AST.
 - Type checking (bootstrap level).
 
+### Language surface (bootstrap)
+- `let` bindings.
+- Integer and string literals.
+- `if` and `while`.
+- Comparisons (`< <= > >= == !=`) materialize a boolean `0/1` value.
+- Bitwise: `& | ^`, plus word-form `xor`.
+- Unary boolean `not` (and bitwise `~`).
+- Shifts (word-form): `shl`, `shr`, `sar`.
+
 ### IR + lowering
 - AST ? Typed IR (TIR).
 - `if` lowering always produces a valid `else` control-flow shape.
-- Comparison operators (`< <= > >= == !=`) lower into a boolean `0/1` value.
 
 ### Backend
 - TIR ? x64 emission.
@@ -50,4 +58,4 @@ Near-term realistic additions:
 
 ## Notes
 
-Older versions of this document referenced a much larger feature set. This file has been updated to match the current implementation.
+Older versions of this document referenced a larger feature set. This file reflects the current implementation.
