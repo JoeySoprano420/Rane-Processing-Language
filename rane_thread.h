@@ -1,5 +1,11 @@
 #pragma once
 
+#include <cstddef>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Advanced Threading Library for RANE
 
 typedef struct rane_thread_pool_s rane_thread_pool_t;
@@ -14,3 +20,7 @@ typedef struct rane_future_s rane_future_t;
 
 rane_future_t* rane_async(void (*fn)(void*), void* arg);
 void* rane_future_get(rane_future_t* f);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif

@@ -3,12 +3,14 @@
 
 #include "rane_driver.h"
 #include "rane_parser.h"
+#include "rane_lexer.h"
 #include "rane_typecheck.h"
 #include "rane_tir.h"
 #include "rane_ssa.h"
 #include "rane_regalloc.h"
 #include "rane_optimize.h"
 #include "rane_aot.h"
+#include "rane_c_backend.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -129,9 +131,15 @@ static rane_error_t rane_write_pe64_exe_with_printf(
   // [IAT (2 entries)]
   // [import_by_name "printf"]
   const char* dll = "msvcrt.dll";
-  const char* fn = "printf";
+  const char* fn = "rane_rt_print"; // import name used by generated code
   const uint32_t ilt_count = 2;
   const uint32_t thunk_size = 8; // 64-bit
+
+  // NOTE: we still import the symbol from msvcrt; on typical Windows setups
+  // msvcrt exports printf, not rane_rt_print. The name here must match the IBN name.
+  // For bootstrap portability, we map `rane_rt_print` to `printf` by importing `printf`
+  // but letting the callsite symbol be `rane_rt_print`.
+  const char* msvcrt_export = "printf";
 
   uint32_t idata_size = 0;
   uint32_t desc_off = 0;
@@ -140,7 +148,7 @@ static rane_error_t rane_write_pe64_exe_with_printf(
   uint32_t iat_off = ilt_off + ilt_count * thunk_size;
   uint32_t ibn_off = iat_off + ilt_count * thunk_size;
   ibn_off = align_up_u32(ibn_off, 2);
-  uint32_t ibn_size = (uint32_t)(2 + strlen(fn) + 1);
+  uint32_t ibn_size = (uint32_t)(2 + strlen(msvcrt_export) + 1);
   idata_size = align_up_u32(ibn_off + ibn_size, 8);
 
   uint32_t idata_raw_ptr = rdata_raw_ptr + rdata_raw_size;
@@ -256,7 +264,7 @@ static rane_error_t rane_write_pe64_exe_with_printf(
   // import-by-name: [hint=0]["printf\0"]
   uint16_t hint = 0;
   buf_write(idata, idata_raw_size, ibn_off, &hint, 2);
-  buf_write(idata, idata_raw_size, ibn_off + 2, fn, strlen(fn) + 1);
+  buf_write(idata, idata_raw_size, ibn_off + 2, msvcrt_export, strlen(msvcrt_export) + 1);
 
   rane_error_t e = rane_write_entire_file(out_path, img, file_size);
   free(img);
@@ -337,12 +345,32 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   char* src = rane_read_entire_file(opts->input_path, &src_len);
   if (!src) return RANE_E_OS_API_FAIL;
 
-  rane_stmt_t* ast = NULL;
-  rane_error_t err = rane_parse_source(src, &ast);
-  if (err != RANE_OK) { free(src); return err; }
+  // Our file reader appends a NUL terminator at src[src_len].
+  // The lexer/parser length should exclude this terminator.
+  size_t parse_len = src_len;
+  if (parse_len > 0 && src[parse_len - 1] == 0) parse_len--; // defensive
 
-  err = rane_typecheck_ast(ast);
-  if (err != RANE_OK) { free(src); return err; }
+  rane_stmt_t* ast = NULL;
+  rane_diag_t diag = {};
+  rane_error_t err = rane_parse_source_len_ex(src, parse_len, &ast, &diag);
+  if (err != RANE_OK) {
+    // Minimal extra context: show first token kind.
+    rane_lexer_t lex;
+    rane_lexer_init(&lex, src, parse_len);
+    rane_token_t t0 = rane_lexer_next(&lex);
+    fprintf(stderr, "rane: parse error (%u:%u): %s\n", (unsigned)diag.span.line, (unsigned)diag.span.col, diag.message);
+    fprintf(stderr, "rane: lexer first token: %s\n", rane_token_type_str(t0.type));
+    free(src);
+    return err;
+  }
+
+  diag = {};
+  err = rane_typecheck_ast_ex(ast, &diag);
+  if (err != RANE_OK) {
+    fprintf(stderr, "rane: type error (%u:%u): %s\n", (unsigned)diag.span.line, (unsigned)diag.span.col, diag.message);
+    free(src);
+    return err;
+  }
 
   rane_tir_module_t tir_mod = {};
   err = rane_lower_ast_to_tir(ast, &tir_mod);
@@ -364,13 +392,12 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   code = aot.code;
   code_size = aot.code_size;
 
-  // --- v0/v1 .rdata: format string + pooled user strings, patch MOV imm64s ---
+  // --- v0/v1 .rdata: pooled user strings, patch MOV imm64s ---
   const uint64_t image_base = 0x0000000140000000ULL;
   const uint32_t rdata_rva = 0x2000;
   const uint64_t rdata_va = image_base + rdata_rva;
 
-  const char* fmt = "%s";
-  const size_t fmt_len = strlen(fmt) + 1;
+  // NOTE: no more format string sentinel patching is needed for print.
 
   // Collect string pointers from the lowered TIR
   rane_string_patch_t str_patches[256];
@@ -390,7 +417,7 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   }
 
   // Layout: [fmt][pad8][str0][pad8]...[strN]
-  uint32_t rdata_size = (uint32_t)fmt_len;
+  uint32_t rdata_size = (uint32_t)4;
   rdata_size = align_up_u32(rdata_size, 8);
 
   uint32_t str_offs[256];
@@ -407,7 +434,6 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   uint8_t* rdata = (uint8_t*)calloc(1, rdata_size);
   if (!rdata) { free(aot.call_fixups); free(code); free(src); return RANE_E_OS_API_FAIL; }
 
-  memcpy(rdata, fmt, fmt_len);
   // strings
   for (uint32_t i = 0; i < uniq_count; i++) {
     const char* s = (const char*)(uintptr_t)uniq_ptrs[i];
@@ -432,21 +458,7 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
     }
   }
 
-  // Also patch print()'s format-string immediate (lowering uses imm=0 sentinel)
-  {
-    uint64_t zero64 = 0;
-    uint64_t fmt_va = rdata_va + 0;
-    uint32_t occ[256];
-    uint32_t occ_count = scan_code_for_mov_imm64(c, (uint32_t)code_size, zero64, occ, 256);
-    uint32_t lim = occ_count;
-    if (lim > 256) lim = 256;
-    for (uint32_t k = 0; k < lim; k++) {
-      uint32_t imm_off = occ[k];
-      if (imm_off + 8 <= code_size) {
-        memcpy(c + imm_off, &fmt_va, 8);
-      }
-    }
-  }
+  // NOTE: legacy print() format-string patching removed; print lowering now calls `rane_rt_print`.
 
   // --- import patch address (msvcrt!printf IAT) based on our fixed PE layout ---
   // Must match `rane_write_pe64_exe_with_printf` layout.
@@ -460,7 +472,7 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   uint32_t iat_off = ilt_off + ilt_count * thunk_size;
   const uint64_t iat_va = image_base + idata_rva + iat_off;
 
-  // Patch calls using fixups (required)
+  // Patch calls using fixups
   if (aot.call_fixup_count == 0 || !aot.call_fixups) {
     free(rdata);
     free(code);
@@ -469,11 +481,11 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
   }
 
   for (uint32_t i = 0; i < aot.call_fixup_count; i++) {
-    if (strcmp(aot.call_fixups[i].sym, "printf") != 0) continue;
+    // Both legacy `printf` and new `rane_rt_print` callsites are redirected to the same IAT entry.
+    if (strcmp(aot.call_fixups[i].sym, "printf") != 0 && strcmp(aot.call_fixups[i].sym, "rane_rt_print") != 0) continue;
     uint32_t off = aot.call_fixups[i].code_offset;
     if (off + 9 > code_size) continue;
 
-    // Overwrite placeholder with: 48 8B 05 disp32 ; FF D0
     c[off + 0] = 0x48;
     c[off + 1] = 0x8B;
     c[off + 2] = 0x05;
@@ -483,12 +495,61 @@ rane_error_t rane_compile_file_to_exe(const rane_driver_options_t* opts) {
     c[off + 8] = 0xD0;
   }
 
-  // Emit exe with printf import
+  // Emit exe (imports msvcrt!printf but callsites are named rane_rt_print in IR)
   err = rane_write_pe64_exe_with_printf(opts->output_path, (const uint8_t*)code, (uint32_t)code_size, rdata, rdata_size);
 
   free(aot.call_fixups);
   free(rdata);
   free(code);
+  free(src);
+  return err;
+}
+
+rane_error_t rane_compile_file_to_c(const rane_driver_options_t* opts) {
+  if (!opts || !opts->input_path || !opts->output_path) return RANE_E_INVALID_ARG;
+
+  size_t src_len = 0;
+  char* src = rane_read_entire_file(opts->input_path, &src_len);
+  if (!src) return RANE_E_OS_API_FAIL;
+
+  size_t parse_len = src_len;
+  if (parse_len > 0 && src[parse_len - 1] == 0) parse_len--; // defensive
+
+  rane_stmt_t* ast = NULL;
+  rane_diag_t diag = {};
+  rane_error_t err = rane_parse_source_len_ex(src, parse_len, &ast, &diag);
+  if (err != RANE_OK) {
+    rane_lexer_t lex;
+    rane_lexer_init(&lex, src, parse_len);
+    rane_token_t t0 = rane_lexer_next(&lex);
+    fprintf(stderr, "rane: parse error (%u:%u): %s\n", (unsigned)diag.span.line, (unsigned)diag.span.col, diag.message);
+    fprintf(stderr, "rane: lexer first token: %s\n", rane_token_type_str(t0.type));
+    free(src);
+    return err;
+  }
+
+  diag = {};
+  err = rane_typecheck_ast_ex(ast, &diag);
+  if (err != RANE_OK) {
+    fprintf(stderr, "rane: type error (%u:%u): %s\n", (unsigned)diag.span.line, (unsigned)diag.span.col, diag.message);
+    free(src);
+    return err;
+  }
+
+  rane_tir_module_t tir_mod = {};
+  err = rane_lower_ast_to_tir(ast, &tir_mod);
+  if (err != RANE_OK) { free(src); return err; }
+
+  rane_build_ssa(&tir_mod);
+  rane_allocate_registers(&tir_mod);
+
+  err = rane_optimize_tir_with_level(&tir_mod, opts->opt_level);
+  if (err != RANE_OK) { free(src); return err; }
+
+  rane_c_backend_options_t cb = {};
+  cb.output_c_path = opts->output_path;
+
+  err = rane_emit_c_from_tir(&tir_mod, &cb);
   free(src);
   return err;
 }

@@ -13,6 +13,29 @@ typedef enum rane_token_type_e {
   TOK_INT_LITERAL,
   TOK_STRING_LITERAL,
   TOK_BOOL_LITERAL,
+
+  // ---------------------------
+  // v1 prose/node surface
+  // ---------------------------
+  TOK_KW_MODULE,
+  TOK_KW_NODE,
+  TOK_KW_START,
+  TOK_KW_AT_KW,
+  TOK_KW_GO,
+  TOK_KW_TO_KW,
+  TOK_KW_SAY,
+
+  // ---------------------------
+  // v1 structured-data surface (new)
+  // ---------------------------
+  TOK_KW_SET,
+  TOK_KW_PUT,
+  TOK_KW_BY,
+  TOK_KW_END,
+
+  // ---------------------------
+  // Core keywords (existing)
+  // ---------------------------
   TOK_KW_LET,
   TOK_KW_IF,
   TOK_KW_THEN,
@@ -93,6 +116,93 @@ typedef enum rane_token_type_e {
   TOK_KW_MUL,
   TOK_KW_DIV,
   TOK_KW_MOD,
+
+  // ---------------------------
+  // Expanded keywords (new)
+  // ---------------------------
+  TOK_KW_FOR,
+  TOK_KW_BREAK,
+  TOK_KW_CONTINUE,
+  TOK_KW_TRY,
+  TOK_KW_CATCH,
+  TOK_KW_THROW,
+  TOK_KW_INCLUDE,
+  TOK_KW_EXCLUDE,
+  TOK_KW_DEFINE,
+  TOK_KW_IFDEF,
+  TOK_KW_IFNDEF,
+  TOK_KW_PRAGMA,
+  TOK_KW_NAMESPACE,
+  TOK_KW_ENUM,
+  TOK_KW_STRUCT,
+  TOK_KW_CLASS,
+  TOK_KW_PUBLIC,
+  TOK_KW_PRIVATE,
+  TOK_KW_PROTECTED,
+  TOK_KW_STATIC,
+  TOK_KW_INLINE,
+  TOK_KW_EXTERN_KW,
+  TOK_KW_VIRTUAL,
+  TOK_KW_CONST,
+  TOK_KW_VOLATILE,
+  TOK_KW_CONSTEXPR,
+  TOK_KW_CONSTEVAL,
+  TOK_KW_CONSTINIT,
+  TOK_KW_NEW,
+  TOK_KW_DEL,
+  TOK_KW_CAST,
+  TOK_KW_TYPE,
+  TOK_KW_TYPE_ALIAS,
+  TOK_KW_ALIAS,
+  TOK_KW_MUT,
+  TOK_KW_IMMUTABLE,
+  TOK_KW_MUTABLE,
+  TOK_KW_NULL,
+  TOK_KW_MATCH,
+  TOK_KW_PATTERN,
+  TOK_KW_LAMBDA,
+
+  // Identifiers that the user listed but are not yet semantic:
+  TOK_KW_HANDLE,
+  TOK_KW_TARGET,
+  TOK_KW_SPLICE,
+  TOK_KW_SPLIT,
+  TOK_KW_DIFFERENCE,
+  TOK_KW_INCREMENT,
+  TOK_KW_DECREMENT,
+  TOK_KW_DEDICATE,
+  TOK_KW_MUTEX,
+  TOK_KW_IGNORE,
+  TOK_KW_BYPASS,
+  TOK_KW_ISOLATE,
+  TOK_KW_SEPARATE,
+  TOK_KW_JOIN,
+  TOK_KW_DECLARATION,
+  TOK_KW_COMPILE,
+  TOK_KW_SCORE,
+  TOK_KW_SYS,
+  TOK_KW_ADMIN,
+  TOK_KW_UNROLL,
+  TOK_KW_PLOT,
+  TOK_KW_PEAK,
+  TOK_KW_POINT,
+  TOK_KW_REG,
+  TOK_KW_EXCEPTION,
+  TOK_KW_ALIGN,
+  TOK_KW_MUTATE,
+  TOK_KW_STRING,
+  TOK_KW_LITERAL,
+  TOK_KW_LINEAR,
+  TOK_KW_NONLINEAR,
+  TOK_KW_PRIMITIVES,
+  TOK_KW_TUPLES,
+  TOK_KW_MEMBER,
+  TOK_KW_OPEN,
+  TOK_KW_CLOSE,
+
+  // ---------------------------
+  // Operators / punctuation
+  // ---------------------------
   TOK_KW_EQ,
   TOK_KW_NE,
   TOK_KW_LT,
@@ -100,6 +210,11 @@ typedef enum rane_token_type_e {
   TOK_KW_GT,
   TOK_KW_GE,
   TOK_KW_ASSIGN,
+
+  // Multi-character logical operators
+  TOK_KW_ANDAND, // &&
+  TOK_KW_OROR,   // ||
+
   TOK_KW_COLON,
   TOK_KW_SEMICOLON,
   TOK_KW_COMMA,
@@ -137,9 +252,12 @@ typedef enum rane_token_type_e {
   TOK_KW_BACKTICK,
   TOK_KW_QUOTE,
   TOK_KW_DOUBLEQUOTE,
+
+  // Explicit whitespace tokens (optional; lexer currently skips them)
   TOK_KW_NEWLINE,
   TOK_KW_TAB,
   TOK_KW_SPACE,
+
   TOK_ERROR
 } rane_token_type_t;
 

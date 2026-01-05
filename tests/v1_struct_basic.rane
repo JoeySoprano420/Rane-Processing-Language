@@ -1,0 +1,26 @@
+module demo_struct
+
+struct Header:
+  magic: u32
+  version: u16
+  flags: u16
+  size: u64
+end
+
+node start:
+  set h: Header to Header{
+    magic: 0x52414E45
+    version: 1
+    flags: 0
+    size: 4096
+  }
+
+  set m: u32 to h.magic
+  set h.version to 2
+  add h.size by 512
+
+  say "ok"
+  halt
+end
+
+start at node start

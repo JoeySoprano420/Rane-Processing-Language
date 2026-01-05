@@ -32,6 +32,7 @@ int main(int argc, char** argv) {
         const char* in = argv[1];
         const char* out = "a.exe";
         int opt = 2;
+        int emit_c = 0;
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
@@ -40,6 +41,7 @@ int main(int argc, char** argv) {
             else if (strcmp(argv[i], "-O1") == 0) opt = 1;
             else if (strcmp(argv[i], "-O2") == 0) opt = 2;
             else if (strcmp(argv[i], "-O3") == 0) opt = 3;
+            else if (strcmp(argv[i], "-emit-c") == 0) emit_c = 1;
         }
 
         rane_driver_options_t opts;
@@ -47,7 +49,8 @@ int main(int argc, char** argv) {
         opts.output_path = out;
         opts.opt_level = opt;
 
-        rane_error_t err = rane_compile_file_to_exe(&opts);
+        rane_error_t err = emit_c ? rane_compile_file_to_c(&opts)
+                                  : rane_compile_file_to_exe(&opts);
         if (err != RANE_OK) {
             fprintf(stderr, "rane: compile failed (%d)\n", (int)err);
             return 1;
@@ -56,6 +59,9 @@ int main(int argc, char** argv) {
         printf("rane: wrote %s\n", out);
         return 0;
     }
+
+    // Validate core subsystems in the demo path.
+    rane_gc_run_selftest();
 
     // Fallback: keep existing in-process demo path
     rane_layout_spec_t layout = {};

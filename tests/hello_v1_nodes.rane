@@ -1,0 +1,8 @@
+module hello
+
+node start:
+  say "Hello from RANE."
+  halt
+end
+
+start at node start

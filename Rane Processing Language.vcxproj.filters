@@ -99,6 +99,18 @@
     <ClInclude Include="rane_label.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="rane_diag.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rane_parser_ex.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rane_c_backend.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rane_rt.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="rane_loader_impl.cpp">
@@ -182,6 +194,15 @@
     <ClCompile Include="rane_label.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="rane_c_backend.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rane_rt.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rane_gc_tests.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
@@ -190,5 +211,8 @@
     <None Include="breakdown.md" />
     <None Include="hello.rane" />
     <None Include="about.md" />
+    <None Include="tests\exhaustive_exprs.rane" />
+    <None Include="tests\hello_v1_nodes.rane" />
+    <None Include="tests\v1_struct_basic.rane" />
   </ItemGroup>
 </Project>

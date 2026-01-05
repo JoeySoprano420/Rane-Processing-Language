@@ -20,6 +20,9 @@ typedef enum rane_diag_code_e {
   RANE_DIAG_REDECLARED_NAME,
   RANE_DIAG_TYPE_MISMATCH,
 
+  // Policy / security
+  RANE_DIAG_SECURITY_VIOLATION,
+
   // Misc
   RANE_DIAG_INTERNAL_ERROR
 } rane_diag_code_t;

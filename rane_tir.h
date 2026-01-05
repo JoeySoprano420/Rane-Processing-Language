@@ -28,15 +28,30 @@ typedef enum rane_tir_opcode_e {
   TIR_DATA_BYTES,
   TIR_DATA_U32,
   TIR_DATA_U64,
+  TIR_DATA_ZSTR,
   TIR_DATA_END,
   TIR_CONST,
   TIR_DBG_LINE,
+
+  // New: materialize address of a label into a register (RIP-relative in codegen)
+  // operands:
+  //  - r0: dst
+  //  - lbl: target label
+  TIR_ADDR_OF,
 
   // Control flow
   TIR_JMP,
   TIR_JCC,
   TIR_JCC_EXT,
   TIR_SWITCH,
+
+  // Call ABI helpers (Win64 bootstrap)
+  // Prepare a call frame for upcoming CALL_*.
+  // operands:
+  //  - imm0: stack_arg_bytes (bytes of stack args, not including shadow space)
+  //  - imm1: flags (reserved)
+  TIR_CALL_PREP,
+
   TIR_CALL_LOCAL,
   TIR_CALL_IMPORT,
   TIR_RET,

@@ -128,6 +128,7 @@
     <ClInclude Include="rane_bst.h" />
     <ClInclude Include="rane_common.h" />
     <ClInclude Include="rane_crypto.h" />
+    <ClInclude Include="rane_c_backend.h" />
     <ClInclude Include="rane_diag.h" />
     <ClInclude Include="rane_driver.h" />
     <ClInclude Include="rane_except.h" />
@@ -145,6 +146,7 @@
     <ClInclude Include="rane_parser_ex.h" />
     <ClInclude Include="rane_perf.h" />
     <ClInclude Include="rane_regalloc.h" />
+    <ClInclude Include="rane_rt.h" />
     <ClInclude Include="rane_security.h" />
     <ClInclude Include="rane_ssa.h" />
     <ClInclude Include="rane_stdlib.h" />
@@ -159,10 +161,12 @@
     <ClCompile Include="rane_aot.cpp" />
     <ClCompile Include="rane_bst.cpp" />
     <ClCompile Include="rane_crypto.cpp" />
+    <ClCompile Include="rane_c_backend.cpp" />
     <ClCompile Include="rane_driver.cpp" />
     <ClCompile Include="rane_except.cpp" />
     <ClCompile Include="rane_file.cpp" />
     <ClCompile Include="rane_gc.cpp" />
+    <ClCompile Include="rane_gc_tests.cpp" />
     <ClCompile Include="rane_graph.cpp" />
     <ClCompile Include="rane_hashmap.cpp" />
     <ClCompile Include="rane_heap.cpp" />
@@ -174,6 +178,7 @@
     <ClCompile Include="rane_parser.cpp" />
     <ClCompile Include="rane_perf.cpp" />
     <ClCompile Include="rane_regalloc.cpp" />
+    <ClCompile Include="rane_rt.cpp" />
     <ClCompile Include="rane_security.cpp" />
     <ClCompile Include="rane_ssa.cpp" />
     <ClCompile Include="rane_stdlib.cpp" />
@@ -190,6 +195,9 @@
     <None Include="history.md" />
     <None Include="howto.md" />
     <None Include="README.md" />
+    <None Include="tests\exhaustive_exprs.rane" />
+    <None Include="tests\hello_v1_nodes.rane" />
+    <None Include="tests\v1_struct_basic.rane" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

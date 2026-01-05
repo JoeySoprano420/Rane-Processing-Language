@@ -19,8 +19,20 @@ typedef enum rane_type_e {
   RANE_TYPE_I64,
   RANE_TYPE_P64,
   RANE_TYPE_B1,
-  RANE_TYPE_STRING
+  // Bootstrap legacy: heap pointer to NUL-terminated string
+  RANE_TYPE_STRING,
+  // v1: distinct types for `say` (both are represented as pointer-sized values in bootstrap)
+  RANE_TYPE_TEXT,
+  RANE_TYPE_BYTES
 } rane_type_e;
+
+// ---------------------------
+// Named types (v1)
+// ---------------------------
+
+typedef struct rane_type_name_s {
+  char name[64];
+} rane_type_name_t;
 
 // ---------------------------
 // Expression Kinds
@@ -30,13 +42,24 @@ typedef enum rane_expr_kind_e {
   EXPR_VAR,
   EXPR_LIT_INT,
   EXPR_LIT_BOOL,
+  EXPR_LIT_TEXT,
+  EXPR_LIT_BYTES,
   EXPR_UNARY,
   EXPR_BINARY,
   EXPR_CALL,
+  EXPR_MEMBER,
+  EXPR_INDEX,
   EXPR_CHOOSE,
   EXPR_ADDR,
   EXPR_LOAD,
-  EXPR_STORE
+  EXPR_STORE,
+  EXPR_LIT_IDENT,
+  EXPR_MMIO_ADDR,
+  EXPR_LIT_NULL,
+  EXPR_TERNARY,
+
+  // v1: struct literal construction
+  EXPR_STRUCT_LITERAL
 } rane_expr_kind_e;
 
 // ---------------------------
@@ -100,7 +123,21 @@ typedef enum rane_stmt_kind_e {
   STMT_IF,
   STMT_WHILE,
   STMT_PROC,
-  STMT_RETURN
+  STMT_RETURN,
+  STMT_BREAK,
+  STMT_CONTINUE,
+
+  // v1 data model
+  STMT_STRUCT_DECL,
+  STMT_SET,
+  STMT_ADD,
+
+  // v1 prose/node surface
+  STMT_MODULE,
+  STMT_NODE,
+  STMT_START_AT,
+  STMT_GO_NODE,
+  STMT_SAY
 } rane_stmt_kind_e;
 
 // ---------------------------
@@ -128,6 +165,19 @@ struct rane_expr_s {
     struct {
       int value;
     } lit_bool;
+
+    // New: literals represented directly as source slices.
+    // For bootstrap, these slices still point into the input buffer.
+    struct {
+      const char* start;
+      uint32_t length;
+    } lit_text;
+
+    struct {
+      const char* start;
+      uint32_t length;
+    } lit_bytes;
+
     struct {
       rane_unary_op_e op;
       rane_expr_t* expr;
@@ -137,11 +187,28 @@ struct rane_expr_s {
       rane_expr_t* left;
       rane_expr_t* right;
     } binary;
+
+    // Call: either a simple name call or a callee expression call.
+    // If `callee` is non-null, it is used; otherwise `name` is used.
     struct {
       char name[64];
+      rane_expr_t* callee;
       rane_expr_t** args;
       uint32_t arg_count;
     } call;
+
+    // New: member access: base.member
+    struct {
+      rane_expr_t* base;
+      char member[64];
+    } member;
+
+    // New: index access: base[index]
+    struct {
+      rane_expr_t* base;
+      rane_expr_t* index;
+    } index;
+
     struct {
       enum {
         CHOOSE_MAX,
@@ -150,6 +217,7 @@ struct rane_expr_s {
       rane_expr_t* a;
       rane_expr_t* b;
     } choose;
+
     struct {
       rane_expr_t* base;
       rane_expr_t* index;
@@ -167,6 +235,40 @@ struct rane_expr_s {
       rane_expr_t* value_expr;
       int volatility;
     } store;
+    struct {
+      char value[64];
+    } lit_ident;
+    struct {
+      char region[64];
+      rane_expr_t* offset;
+    } mmio_addr;
+
+    struct {
+      uint64_t reserved;
+    } lit_null;
+
+    struct {
+      rane_expr_t* cond;
+      rane_expr_t* then_expr;
+      rane_expr_t* else_expr;
+    } ternary;
+
+    // v1: struct literal
+    // Name{ field: expr ... } or Name(expr, ...)
+    struct {
+      char type_name[64];
+      // If named_fields is non-zero, use fields[]; otherwise use pos_args[].
+      uint32_t named_fields;
+
+      struct {
+        char name[64];
+        rane_expr_t* value;
+      } fields[32];
+      uint32_t field_count;
+
+      rane_expr_t* pos_args[32];
+      uint32_t pos_count;
+    } struct_lit;
   };
 };
 
@@ -279,5 +381,60 @@ struct rane_stmt_s {
     struct {
       rane_expr_t* expr; // may be NULL for bare return
     } ret;
+
+    // break/continue have no payload in bootstrap.
+    struct { uint8_t _; } brk;
+    struct { uint8_t _; } cont;
+
+    // v1 prose/node surface
+    struct {
+      char name[64];
+    } module_decl;
+
+    struct {
+      char name[64];
+      rane_stmt_t* body; // STMT_BLOCK
+    } node_decl;
+
+    struct {
+      char node_name[64];
+    } start_at;
+
+    struct {
+      char node_name[64];
+    } go_node;
+
+    struct {
+      rane_expr_t* expr;
+    } say;
+
+    // v1: struct definition
+    struct {
+      char name[64];
+      struct {
+        char name[64];
+        // For now, keep field types as names (e.g. u32, Header).
+        // Typechecking will resolve primitives vs named types.
+        rane_type_name_t type_name;
+      } fields[32];
+      uint32_t field_count;
+    } struct_decl;
+
+    // v1: set statement
+    // Forms:
+    //  - set x: Ty to expr
+    //  - set target_expr to expr   (where target_expr can be member access)
+    struct {
+      char name[64];
+      rane_type_name_t type_name; // optional (name[0]==0 => not a declaration)
+      rane_expr_t* target_expr;   // used when assigning into member
+      rane_expr_t* value;
+    } set_stmt;
+
+    // v1: add target by expr (numeric update)
+    struct {
+      rane_expr_t* target_expr;
+      rane_expr_t* value;
+    } add_stmt;
   };
 };

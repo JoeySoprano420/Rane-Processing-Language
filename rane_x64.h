@@ -30,6 +30,16 @@ void rane_x64_emit_mov_reg_imm64(rane_x64_emitter_t* e, uint8_t reg, uint64_t im
 void rane_x64_emit_mov_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg);
 void rane_x64_emit_mov_reg_mem(rane_x64_emitter_t* e, uint8_t reg, uint8_t base_reg, int32_t disp);
 void rane_x64_emit_mov_mem_reg(rane_x64_emitter_t* e, uint8_t base_reg, int32_t disp, uint8_t reg);
+
+// New: LEA reg, [RIP + rel32] (for TIR_ADDR_OF)
+void rane_x64_emit_lea_reg_rip_rel32(rane_x64_emitter_t* e, uint8_t reg, int32_t rel32);
+
+// Win64 call ABI helpers
+void rane_x64_emit_mov_rsp_disp_reg(rane_x64_emitter_t* e, int32_t disp, uint8_t reg);
+void rane_x64_emit_sub_rsp_imm8(rane_x64_emitter_t* e, uint8_t imm);
+void rane_x64_emit_add_rsp_imm8(rane_x64_emitter_t* e, uint8_t imm);
+void rane_x64_emit_call_placeholder(rane_x64_emitter_t* e);
+
 void rane_x64_emit_add_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg);
 void rane_x64_emit_sub_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg);
 void rane_x64_emit_cmp_reg_reg(rane_x64_emitter_t* e, uint8_t reg1, uint8_t reg2);

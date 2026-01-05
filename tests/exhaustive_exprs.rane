@@ -1,0 +1,84 @@
+// Exhaustive expression coverage (bootstrap)
+// Note: this is primarily a compile-time regression test for the parser/typechecker/lowering.
+
+import rane_rt_print;
+
+mmio region REG from 4096 size 256;
+
+proc add5(a, b, c, d, e) {
+  // exercise arithmetic + return
+  return a + b + c + d + e;
+}
+
+proc main() {
+  let a = 1;
+  let b = 2;
+
+  // literals
+  let i = 123;
+  let t = true;
+  let f = false;
+  let s = "hello";
+  let n = null;
+
+  // unary
+  let u0 = -i;
+  let u1 = not f;
+  let u2 = ~i;
+
+  // binary arithmetic / bitwise / shifts
+  let ar0 = a + b;
+  let ar1 = a - b;
+  let ar2 = a * b;
+  let ar3 = 100 / b;
+  let ar4 = 100 % b;
+  let bw0 = a & b;
+  let bw1 = a | b;
+  let bw2 = a ^ b;
+  let bw3 = a xor b;
+  let sh0 = i shl 2;
+  let sh1 = i shr 1;
+  let sh2 = i sar 1;
+
+  // comparisons
+  let c0 = a < b;
+  let c1 = a <= b;
+  let c2 = a > b;
+  let c3 = a >= b;
+  let c4 = a == b;
+  let c5 = a != b;
+
+  // logical short-circuit
+  let l0 = c0 and c5;
+  let l1 = c0 or c4;
+
+  // ternary
+  let te = c0 ? a : b;
+
+  // choose
+  let ch0 = choose max(a, b);
+  let ch1 = choose min(a, b);
+
+  // addr
+  let p = addr(4096, 4, 8, 16);
+
+  // mmio addr + load/store (via read32/write32 sugar)
+  // read32/write32 use EXPR_MMIO_ADDR + EXPR_LOAD/EXPR_STORE in the parser
+  let x = 0;
+  read32 REG, 0 into x;
+  write32 REG, 4, 123;
+
+  // direct load/store forms
+  let y = load(u32, addr(4096, 0, 1, 0));
+  let z = store(u32, addr(4096, 0, 1, 8), 7);
+
+  // ident literal
+  let sym = #rane_rt_print;
+
+  // calls
+  let sum = add5(1, 2, 3, 4, 5);
+  print(s);
+  print(sum);
+
+  return 0;
+}
