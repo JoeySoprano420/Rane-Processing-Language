@@ -686,7 +686,18 @@ static rane_stmt_t* parse_node_stmt(rane_parser_t* p, rane_token_t node_tok) {
 
   while (!check(p, TOK_EOF) && !check(p, TOK_KW_END)) {
     rane_stmt_t* st = parse_stmt(p);
-    if (!st) break;
+    if (!st) {
+      // If terminator, stop.
+      if (check(p, TOK_KW_END)) break;
+
+      // If an actual error was raised, stop.
+      if (p->had_error) break;
+
+      // Otherwise, recover: consume one token to avoid an infinite loop.
+      advance(p);
+      continue;
+    }
+
     b->block.stmts[b->block.stmt_count++] = st;
     consume_optional_semicolon(p);
   }
@@ -851,6 +862,28 @@ static rane_stmt_t* parse_stmt_v1_add(rane_parser_t* p) {
 }
 
 static rane_stmt_t* parse_stmt(rane_parser_t* p) {
+  // Terminator keyword for v1 blocks (node/struct). It is consumed by the enclosing parser.
+  if (check(p, TOK_KW_END)) {
+    return NULL;
+  }
+
+  // v1 node bodies often contain `halt` (tokenized as IDENTIFIER in this lexer).
+  if (check(p, TOK_IDENTIFIER) && p->current.length == 4 && memcmp(p->current.start, "halt", 4) == 0) {
+    advance(p);
+    rane_token_t t = p->previous;
+    consume_optional_semicolon(p);
+
+    rane_stmt_t* s = (rane_stmt_t*)malloc(sizeof(rane_stmt_t));
+    memset(s, 0, sizeof(*s));
+    s->span = span_from_tok(&t);
+    s->kind = STMT_PROC_CALL;
+    strcpy_s(s->proc_call.proc_name, sizeof(s->proc_call.proc_name), "__rane_halt");
+    s->proc_call.slot = 0;
+    s->proc_call.args = NULL;
+    s->proc_call.arg_count = 0;
+    return s;
+  }
+
   // --- v1 prose/node surface ---
   if (match(p, TOK_KW_MODULE)) {
     rane_token_t t = p->previous;
@@ -1338,6 +1371,13 @@ static rane_stmt_t* parse_stmt(rane_parser_t* p) {
     s->proc_call.args = args;
     s->proc_call.arg_count = argc;
     return s;
+  }
+
+  // If we get here and the next token looks like a statement start, surface a useful error.
+  if (check(p, TOK_IDENTIFIER)) {
+    p->had_error = 1;
+    set_diag(p, RANE_DIAG_PARSE_ERROR, p->current, "Unexpected statement (unrecognized identifier at statement position)");
+    return NULL;
   }
 
   return NULL;

@@ -144,18 +144,21 @@ static int is_digit_for_base(char c, int base) {
 static rane_token_type_t identifier_type(const char* s, size_t len);
 
 static rane_token_t number(rane_lexer_t* lex) {
-  // Supports:
-  //  - decimal: 123, 1_000
-  //  - hex: 0xFF, 0xCAFE_BABE
-  //  - bin: 0b1010_0101
+   // Supports:
+   //  - decimal: 123, 1_000
+   //  - hex: 0xFF, 0xCAFE_BABE
+   //  - bin: 0b1010_0101
+   // Caller already consumed first digit; token starts at lex->pos - 1.
   size_t start = lex->pos - 1;
 
-  int base = 10;
-  if (peek(lex) == '0') {
-    char n = peek_next(lex);
+   int base = 10;
+  // Look at the first digit we already consumed.
+  char first = lex->source[start];
+  if (first == '0') {
+    // Prefix is in the upcoming stream.
+    char n = peek(lex);
     if (n == 'x' || n == 'X') {
       base = 16;
-      advance(lex); // consume '0'
       advance(lex); // consume 'x'
       // restart after prefix: keep token start at original start
       while (!is_at_end(lex) && (is_digit_for_base(peek(lex), base) || peek(lex) == '_')) advance(lex);
@@ -163,7 +166,6 @@ static rane_token_t number(rane_lexer_t* lex) {
     }
     if (n == 'b' || n == 'B') {
       base = 2;
-      advance(lex); // consume '0'
       advance(lex); // consume 'b'
       while (!is_at_end(lex) && (is_digit_for_base(peek(lex), base) || peek(lex) == '_')) advance(lex);
       return make_token(lex, TOK_INT_LITERAL, lex->source + start, lex->pos - start);
@@ -178,7 +180,9 @@ static rane_token_t number(rane_lexer_t* lex) {
 }
 
 static rane_token_t identifier(rane_lexer_t* lex) {
-  size_t start = lex->pos - 1; // already advanced first char
+  // NOTE: caller has already consumed the first identifier character via advance().
+  // That character is at lex->pos - 1.
+  size_t start = lex->pos - 1;
   while (!is_at_end(lex) && is_ident_continue(peek(lex))) {
     advance(lex);
   }
@@ -190,6 +194,7 @@ static rane_token_t identifier(rane_lexer_t* lex) {
   if (n >= sizeof(buf)) n = sizeof(buf) - 1;
   memcpy(buf, lex->source + start, n);
   buf[n] = 0;
+
   rane_token_type_t type = identifier_type(buf, n);
   return make_token(lex, type, lex->source + start, len);
 }
@@ -310,7 +315,6 @@ typedef struct rane_kw_s {
 } rane_kw_t;
 
 static rane_token_type_t identifier_type(const char* s, size_t len) {
-
    static const rane_kw_t kws[] = {
     // v1 prose/node surface
     {"module", 6, TOK_KW_MODULE},
@@ -320,6 +324,9 @@ static rane_token_type_t identifier_type(const char* s, size_t len) {
     {"go", 2, TOK_KW_GO},
     {"to", 2, TOK_KW_TO_KW},
     {"say", 3, TOK_KW_SAY},
+
+    // v1 prose/node body
+    {"halt", 4, TOK_KW_HALT},
 
     // v1 structured-data surface
     {"set", 3, TOK_KW_SET},
