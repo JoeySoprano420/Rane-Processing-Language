@@ -181,3 +181,83 @@ Many advanced features described in older documents are **planned**, not yet imp
 
 ---
 
+Here’s a clean, polished **Vision** section you can paste directly into your README.  
+It’s written to match the tone and structure of the rest of your document, and it reflects the direction RANE is clearly growing toward.
+
+You can drop this right after **Current Status**.
+
+---
+
+# **Vision: The Future of RANE**
+
+RANE’s long‑term direction extends far beyond the current bootstrap compiler.  
+The project aims to evolve into a **deterministic, capability‑oriented, multi‑stage systems language** with a focus on clarity, analyzability, and high‑performance native execution.
+
+Future development is centered around the following pillars:
+
+## **1. A Rich, Explicit Type System**
+RANE will introduce a full suite of type‑level constructs designed for determinism and analyzability:
+
+- **Type annotations** for all declarations  
+- **User‑defined types** (records, enums, tagged unions)  
+- **Capsules** as explicit, analyzable units of state + behavior  
+- **Containers** with predictable memory layout  
+- **Qualifiers** for purity, determinism, and side‑effect control  
+- **Specify clauses** for constraints and type‑level contracts  
+
+The goal is a type system that remains simple, explicit, and zero‑cost at runtime.
+
+## **2. Durations, Privileges, and Capability‑Oriented Semantics**
+RANE will adopt a capability‑driven execution model:
+
+- **Durations** define where and how long values live  
+- **Privileges** define what code is allowed to do  
+- **Capability scopes** ensure safety without hidden checks or runtime overhead  
+
+These features form a static, analyzable capability lattice that replaces implicit lifetimes, hidden conversions, and ad‑hoc access rules found in other systems languages.
+
+## **3. Memory‑Band Architecture**
+The prototype loader will evolve into a full **multi‑band execution model**:
+
+- **CORE** — immutable, trusted code  
+- **AOT** — ahead‑of‑time compiled modules  
+- **JIT** — deterministic runtime specialization  
+- **META** — compile‑time execution and reflection  
+- **HEAP** — dynamic allocations  
+- **MMAP** — mapped regions and device memory  
+
+Bands provide structure for optimization, safety, and predictable performance.
+
+## **4. High‑Performance Native Execution**
+RANE aims to reach performance comparable to C, Zig, and Rust through:
+
+- SSA‑based optimization  
+- Inlining, LTO, and PGO  
+- Auto‑vectorization and SIMD lowering  
+- Loop optimizations and unrolling  
+- A full register allocator  
+- Deterministic JIT specialization for hot paths  
+
+The long‑term goal is **native‑class throughput with deterministic behavior**.
+
+## **5. Self‑Hosting and Toolchain Maturity**
+RANE will eventually compile itself, enabling:
+
+- Faster iteration  
+- A cleaner, more expressive compiler codebase  
+- A stable foundation for future language evolution  
+
+A module system, improved diagnostics, and a standard library will support real‑world development.
+
+## **6. Deterministic Multi‑Stage Programming**
+RANE’s META and JIT bands will support:
+
+- Compile‑time code generation  
+- Runtime specialization  
+- Safe, deterministic multi‑stage execution  
+- Domain‑specific languages  
+- High‑performance pipelines and simulation engines  
+
+This enables patterns that are difficult or impossible in traditional AOT‑only languages.
+
+---
