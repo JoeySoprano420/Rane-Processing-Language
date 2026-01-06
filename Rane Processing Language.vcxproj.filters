@@ -214,5 +214,11 @@
     <None Include="tests\exhaustive_exprs.rane" />
     <None Include="tests\hello_v1_nodes.rane" />
     <None Include="tests\v1_struct_basic.rane" />
+    <None Include="CONTRIBUTING.md" />
+    <None Include="onboarding.md" />
+    <None Include="tutorial.md" />
+    <None Include="syntax.rane" />
+    <None Include="antlr grammar.g4" />
+    <None Include="rane typesystem.rane" />
   </ItemGroup>
 </Project>

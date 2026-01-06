@@ -116,6 +116,8 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp23</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -190,14 +192,20 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="about.md" />
+    <None Include="antlr grammar.g4" />
     <None Include="breakdown.md" />
+    <None Include="CONTRIBUTING.md" />
     <None Include="hello.rane" />
     <None Include="history.md" />
     <None Include="howto.md" />
+    <None Include="onboarding.md" />
+    <None Include="rane typesystem.rane" />
     <None Include="README.md" />
+    <None Include="syntax.rane" />
     <None Include="tests\exhaustive_exprs.rane" />
     <None Include="tests\hello_v1_nodes.rane" />
     <None Include="tests\v1_struct_basic.rane" />
+    <None Include="tutorial.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
