@@ -1,12 +1,7 @@
 # **RANE Processing Language**
-**Updated: 1/5/2026**
+**Updated: 1/6/2026**
 
-RANE is a deterministic, statically typed, low‑level systems language with compile‑time execution, explicit foreign boundaries, and a ritualized emphasis on clarity and analyzability.
-
-Minimalist, Bootstrap‑Friendly Architecture
-
-RANE is an experimental programming language and native‑code toolchain written in C++14.  
-The current repository contains a **bootstrap compiler** targeting **Windows x64**, producing a minimal **PE executable**. The focus of this stage is correctness, determinism, and a clean end‑to‑end pipeline.
+RANE is a deterministic, statically typed, low‑level systems language with explicit foreign boundaries and an emphasis on clarity and analyzability.
 
 RANE is under active development. Some concepts referenced in older documents (e.g., advanced type features, full memory‑band semantics) are **planned**, not fully implemented yet.
 
@@ -16,62 +11,66 @@ RANE is under active development. Some concepts referenced in older documents (e
 
 The current compiler emphasizes:
 
-- A **minimal surface language**  
-  (`let`, expressions, `if`/`while`, `proc`, `return`, builtin `print`)
+- A minimal surface language with deterministic semantics
 - A **Typed Intermediate Representation (TIR)**
-- A small, direct **x64 backend**
-- A prototype **memory‑band loader**  
-  (CORE / AOT / JIT / META / HEAP / MMAP) used by the in‑process demo
+- A small, direct, bootstrap‑friendly **Windows x64** backend
+- A minimal PE writer emitting `.text`, `.rdata`, `.idata`
+- Policy-gated capabilities (e.g., heap allocation via `import sys.alloc`)
+- Strong, early diagnostics (parse/typecheck/lower all produce `rane_diag_t`)
 
-This stage is about building a solid, deterministic foundation for future expansion.
+This stage is about building a solid end‑to‑end pipeline where each step is easy to reason about and debug.
 
 ---
 
 # **Language Overview (What Works Today)**
 
-Everything in this section is fully implemented and compiles end‑to‑end  
-**(parse → typecheck → TIR → x64 → PE)**.
+Everything in this section compiles end‑to‑end:
+
+**parse → typecheck → lower (TIR) → x64 → PE(EXE)**
 
 ## **Tokens**
 - Identifiers: `foo`, `_tmp`, `memcpy`
 - Integers: `42`, `1_000_000`, `0xCAFE_BABE`, `0b1010_0101`
-- Strings: `"hello"`
+- Text literals: `"hello"`
 - Booleans: `true`, `false`
-- Operators:  
-  arithmetic `+ - * / %`  
-  bitwise `& | ^ ~`  
-  comparisons `< <= > >= == !=`  
-  logical `and or` (also tokenizes `&&` / `||`)  
-  ternary `? :`
+- Operators:
+  - arithmetic `+ - * / %`
+  - bitwise `& | ^ ~`
+  - comparisons `< <= > >= == !=`
+  - logical `and or` (also tokenizes `&&` / `||`)
+  - ternary `? :`
 - Punctuation: `;`, `{}`, `()`, `,`, `[ ]`, `.`
 
 ---
 
 # **Types (Bootstrap)**
+
 Types are currently inferred. Internally, the compiler uses:
 
-- `u64` — default integer type  
-- `b1` — boolean  
-- `p64` — pointer‑sized integer  
-- `text`, `bytes` — used by builtin operations like `print`
+- `u64` — default integer type
+- `b1` — boolean
+- `p64` — pointer-sized integer (opaque pointer in bootstrap)
+- `text`, `bytes` — used for “string-like” and raw byte sequences
 
 ---
 
 # **Expressions**
-All of the following are fully supported:
+
+Supported expressions:
 
 - Literals: `42`, `"hello"`, `true`
 - Variables: `x`
 - Arithmetic & bitwise expressions
 - Comparisons (returning 0/1)
-- Logical short‑circuiting
+- Logical short‑circuiting (`and`, `or`)
 - Ternary expressions
 - Calls: `foo(1, 2)`
 
 ---
 
 # **Memory Builtins**
-These are built into the parser and lowered directly into TIR:
+
+These are built into the parser and lower directly into TIR:
 
 ```rane
 addr(base, index, scale, disp)
@@ -92,14 +91,42 @@ Supported statements include:
 - `if cond then stmt [else stmt]`
 - `while cond do stmt`
 - `return;` / `return expr;`
-- Low‑level control flow:  
-  `label;`  
-  `jump label;`  
-  `goto cond -> true_label, false_label;`
+- Low‑level control flow:
+  - `label;`
+  - `jump label;`
+  - `goto cond -> true_label, false_label;`
+
+---
+
+# **User-Defined Structs (v1)**
+
+RANE supports simple struct declarations and literals:
+
+```rane
+struct Point {
+  x: i32,
+  y: i32,
+}
+
+let p = Point { x: 10, y: 20 };
+mem copy dst, src, size;
+```
+
+### Allocation strategy (bootstrap)
+Struct literals are lowered in a deterministic order:
+
+1. **Stack allocation** (preferred bootstrap):
+   - `set h: Header to Header{ ... }` allocates `Header` bytes in the function stack frame and stores `&stack_slot` into `h`.
+2. **Heap allocation** (policy gated):
+   - `Header{ ... }` in expression position allocates with `rane_alloc(size)` **only if** `import sys.alloc;` is present.
+   - If `sys.alloc` is not imported, lowering hard-fails with a diagnostic.
+3. **Global/static blobs**:
+   - `text` / `bytes` literals are emitted into `.rdata` as real data (see `.rdata` emission below).
 
 ---
 
 # **MMIO Helpers**
+
 These are parsed and lowered:
 
 ```rane
@@ -118,7 +145,8 @@ mem copy dst, src, size;
 ---
 
 # **Zone Blocks**
-Parsed and treated as normal blocks in the bootstrap:
+
+Parsed and treated as normal blocks in the bootstrap compiler:
 
 ```rane
 zone hot {
@@ -129,7 +157,8 @@ zone hot {
 ---
 
 # **Imports / Exports**
-These lower into TIR declarations:
+
+Imports / exports lower into TIR declarations:
 
 ```rane
 import sys.alloc;
@@ -138,30 +167,50 @@ export my_symbol;
 
 ---
 
+# **Diagnostics**
+
+Parse, typecheck, and lowering all use `rane_diag_t`:
+
+- filename-less, span-based error reporting (`line`, `col`, `length`)
+- deterministic messages
+- “hard error everywhere” in lowering (no silent “treat as 0” fallbacks)
+
+---
+
 # **Compiler Pipeline**
-The following components are implemented and working:
+
+Implemented components:
 
 - Lexer / parser / typechecker
 - AST → TIR lowering
 - TIR → x64 machine code generation
 - PE writer emitting `.text`, `.rdata`, `.idata`
-- Import fixups (msvcrt.dll!printf)
+- Import fixups (bootstrap: `msvcrt.dll!printf` backing `rane_rt_print`)
 - Branch fixups (rel32)
-- Small optimizations:
+- Small bootstrap optimizations:
   - peephole MOV folding
   - basic dead‑code elimination
 
 ---
 
-# **Building**
-RANE builds with **Visual Studio (C++14)**.
+# **`.rdata` Emission (Bootstrap)**
 
-1. Open `Rane Processing Language.vcxproj`
-2. Build **Release | x64**
+The compiler emits real `.rdata` content from TIR data directives:
+
+- `TIR_DATA_BEGIN <label>`
+- `TIR_DATA_ZSTR <ptr>`
+- `TIR_DATA_BYTES <ptr,len>`
+- `TIR_DATA_END`
+
+The `.exe` writer builds a `.rdata` blob from these directives and patches `TIR_ADDR_OF` callsites (which are emitted as RIP‑relative `lea`) to point at final `.rdata` virtual addresses.
+
+This replaces the earlier bootstrap approach of patching raw `mov reg, imm64` heap pointers.
 
 ---
 
-## 6) Build the compiler (Visual Studio 2026)
+# **Building (Visual Studio 2026)**
+
+RANE builds with C++ (bootstrap style, VS toolchain).
 
 1. Open the solution/project in Visual Studio.
 2. Select configuration **Release | x64** (or **Debug | x64**).
@@ -170,6 +219,7 @@ RANE builds with **Visual Studio (C++14)**.
 ---
 
 # **Usage**
+
 Compile a `.rane` file into a Windows executable:
 
 ```
@@ -180,190 +230,7 @@ Supported optimization flags: `-O0 -O1 -O2 -O3`.
 
 ---
 
-# **Current Status**
-RANE is a functioning bootstrap compiler with:
-
-- A minimal but real language
-- Deterministic lowering and fixups
-- A typed IR
-- A working native backend
-- A prototype memory‑band loader
-
-Many advanced features described in older documents are **planned**, not yet implemented.
-
----
-
-Here’s a clean, polished **Vision** section you can paste directly into your README.  
-It’s written to match the tone and structure of the rest of your document, and it reflects the direction RANE is clearly growing toward.
-
-You can drop this right after **Current Status**.
-
----
-
-# **Vision: The Future of RANE**
-
-RANE’s long‑term direction extends far beyond the current bootstrap compiler.  
-The project aims to evolve into a **deterministic, capability‑oriented, multi‑stage systems language** with a focus on clarity, analyzability, and high‑performance native execution.
-
-Future development is centered around the following pillars:
-
-## **1. A Rich, Explicit Type System**
-RANE will introduce a full suite of type‑level constructs designed for determinism and analyzability:
-
-- **Type annotations** for all declarations  
-- **User‑defined types** (records, enums, tagged unions)  
-- **Capsules** as explicit, analyzable units of state + behavior  
-- **Containers** with predictable memory layout  
-- **Qualifiers** for purity, determinism, and side‑effect control  
-- **Specify clauses** for constraints and type‑level contracts  
-
-The goal is a type system that remains simple, explicit, and zero‑cost at runtime.
-
-## **2. Durations, Privileges, and Capability‑Oriented Semantics**
-RANE will adopt a capability‑driven execution model:
-
-- **Durations** define where and how long values live  
-- **Privileges** define what code is allowed to do  
-- **Capability scopes** ensure safety without hidden checks or runtime overhead  
-
-These features form a static, analyzable capability lattice that replaces implicit lifetimes, hidden conversions, and ad‑hoc access rules found in other systems languages.
-
-## **3. Memory‑Band Architecture**
-The prototype loader will evolve into a full **multi‑band execution model**:
-
-- **CORE** — immutable, trusted code  
-- **AOT** — ahead‑of‑time compiled modules  
-- **JIT** — deterministic runtime specialization  
-- **META** — compile‑time execution and reflection  
-- **HEAP** — dynamic allocations  
-- **MMAP** — mapped regions and device memory  
-
-Bands provide structure for optimization, safety, and predictable performance.
-
-## **4. High‑Performance Native Execution**
-RANE aims to reach performance comparable to C, Zig, and Rust through:
-
-- SSA‑based optimization  
-- Inlining, LTO, and PGO  
-- Auto‑vectorization and SIMD lowering  
-- Loop optimizations and unrolling  
-- A full register allocator  
-- Deterministic JIT specialization for hot paths  
-
-The long‑term goal is **native‑class throughput with deterministic behavior**.
-
-## **5. Self‑Hosting and Toolchain Maturity**
-RANE will eventually compile itself, enabling:
-
-- Faster iteration  
-- A cleaner, more expressive compiler codebase  
-- A stable foundation for future language evolution  
-
-A module system, improved diagnostics, and a standard library will support real‑world development.
-
-## **6. Deterministic Multi‑Stage Programming**
-RANE’s META and JIT bands will support:
-
-- Compile‑time code generation  
-- Runtime specialization  
-- Safe, deterministic multi‑stage execution  
-- Domain‑specific languages  
-- High‑performance pipelines and simulation engines  
-
-This enables patterns that are difficult or impossible in traditional AOT‑only languages.
-
----
-
-## Onboarding
-
-See `onboarding.md` for a detailed onboarding guide (build prerequisites, compiler pipeline, language syntax and examples, imports/link directives, testing workflow, and roadmap milestones).
-
----
-
-## 13) Performance (current and trajectory)
-
-### Current performance characteristics
-- The compiler is a bootstrap toolchain focused on correctness and deterministic codegen.
-- Generated code is native x64 and runs at machine speed for the subset used.
-- Optimization passes exist but are intentionally small/limited in bootstrap:
-  - peephole MOV folding
-  - basic DCE
-  - (where implemented) constant folding / constexpr hooks
-
-### Expected future performance direction
-Performance will improve primarily via:
-- stronger SSA-based optimizations
-- better inlining/call reasoning
-- improved register allocation
-- more complete instruction selection and lowering
-- deterministic JIT specialization (roadmap)
-
----
-
-## 14) Milestones / trajectory (roadmap)
-
-This is a practical milestone plan aligned with the existing repo direction.
-
-### Milestone 0 — Bootstrap compiler (current)
-- Working lexer/parser/typecheck/TIR/codegen/PE path
-- `.text/.rdata/.idata` emission
-- basic optimizations
-- basic tests in `tests/`
-
-### Milestone 1 — Imports, link hints, and stable FFI
-- Multiple-import `.idata` support
-- Per-symbol call fixups
-- C backend emits dllimport + pragma comment(lib)
-
-### Milestone 2 — Language usability expansion
-- More consistent statement grammar across “core” and “v1 node” surfaces
-- Better diagnostics
-- More predictable syntax for functions/procs and returns
-
-### Milestone 3 — Stronger type system groundwork
-- Explicit type annotations in source
-- User-defined types with deterministic layout
-- More robust type checking
-
-### Milestone 4 — Multi-stage + memory-band integration
-- Expand CORE/AOT/JIT/META/HEAP/MMAP semantics
-- Raise determinism guarantees and enforcement tools
-
----
-
-## 15) Learning prerequisites and learning curve
-
-### Prerequisites
-- Comfortable reading C/C++ (for understanding the compiler implementation)
-- Basic familiarity with compilers/IR is helpful but not required
-- Basic Windows/native concepts help (PE, DLL imports)
-
-### Learning curve guidance
-Recommended path:
-1. Start with the v1 node surface examples in `tests/`
-2. Move to expressions and arithmetic
-3. Learn the `mmio` and memory helper surface (if needed)
-4. Finally learn native imports (`import … from "…"`) and linking hints (`link "…"`)
-
----
-
-## 16) What can RANE make today?
-
-### Today
-- Small Windows x64 executables (single binary output)
-- Programs that:
-  - print simple strings (`say`)
-  - execute arithmetic and control flow
-  - perform limited memory operations via builtins
-  - call imported symbols from DLLs (bootstrap FFI path)
-
-### Later
-- richer systems programs with explicit types, safe/capability constrained operations,
-  and multi-stage compilation (AOT/JIT/META) with deterministic specialization.
-
----
-
-## 17) Tests
+# **Tests**
 
 - `.rane` fixtures live under `tests/`
 - C++ unit tests exist (example: `rane_gc_tests.cpp`)
@@ -372,3 +239,72 @@ Guideline:
 - For each new language feature, add at least one focused `.rane` test under `tests/`.
 
 ---
+
+# **Current Status**
+
+RANE is a functioning bootstrap compiler with:
+
+- A minimal but real language subset
+- Deterministic lowering and fixups
+- A typed IR
+- A working native backend
+- A prototype memory‑band loader
+- Policy‑gated heap usage
+- Span-aware, hard-failing lowering diagnostics
+
+Many advanced features described in older documents are **planned**, not yet implemented.
+
+---
+
+# **Vision: The Future of RANE**
+
+RANE’s long‑term direction extends beyond the current bootstrap compiler.
+The project aims to evolve into a deterministic, capability‑oriented, multi‑stage systems language with a focus on analyzability and high‑performance native execution.
+
+## **1. A Rich, Explicit Type System**
+Planned expansion includes:
+
+- Explicit type annotations for all declarations
+- User-defined types (records, enums, tagged unions)
+- More robust type checking and layout computation
+- Contracts and constraints (“specify” clauses)
+
+## **2. Durations, Privileges, and Capability‑Oriented Semantics**
+RANE’s capability model is intended to formalize:
+
+- where values live (duration)
+- what code is allowed to do (privileges)
+- enforcement without hidden runtime checks
+
+## **3. Memory‑Band Architecture**
+The prototype loader is intended to evolve into a full multi‑band execution model:
+
+- CORE — immutable, trusted code
+- AOT — ahead‑of‑time compiled modules
+- JIT — deterministic runtime specialization
+- META — compile‑time execution and reflection
+- HEAP — dynamic allocations
+- MMAP — mapped regions and device memory
+
+## **4. High‑Performance Native Execution**
+Planned improvements include:
+
+- stronger SSA-based optimizations
+- better inlining/call reasoning
+- improved register allocation
+- more complete instruction selection and lowering
+- deterministic JIT specialization (roadmap)
+
+## **5. Self‑Hosting and Toolchain Maturity**
+Long-term goals include:
+
+- self-hosting
+- module system expansion
+- higher quality diagnostics
+- a standard library suitable for real programs
+
+---
+
+## Onboarding
+
+See `onboarding.md` for a detailed onboarding guide (build prerequisites, compiler pipeline, language syntax and examples, imports/link directives, testing workflow, and roadmap milestones).
