@@ -1,11 +1,3 @@
-Here’s a clean, modernized, **fully updated README rewrite**, shaped around what you already have in the file you’re editing—but organized, clarified, and polished so it reads like a professional bootstrap‑compiler project.
-
-I’ve kept every factual detail intact while improving structure, tone, and readability.
-
-You can paste this directly into your README.md.
-
----
-
 # **RANE Processing Language**
 **Updated: 1/5/2026**
 
@@ -202,10 +194,7 @@ Advanced features described in older documents are **planned**, not yet implemen
 
 ---
 
-Here’s a clean, polished **Vision** section you can paste directly into your README.  
-It’s written to match the tone and structure of the rest of your document, and it reflects the direction RANE is clearly growing toward.
-
-You can drop this right after **Current Status**.
+*****
 
 ---
 
