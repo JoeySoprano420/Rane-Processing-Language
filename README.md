@@ -157,6 +157,14 @@ RANE builds with **Visual Studio (C++14)**.
 
 ---
 
+## 6) Build the compiler (Visual Studio 2026)
+
+1. Open the solution/project in Visual Studio.
+2. Select configuration **Release | x64** (or **Debug | x64**).
+3. Build using __Build Solution__.
+
+---
+
 # **Usage**
 Compile a `.rane` file into a Windows executable:
 
@@ -261,3 +269,176 @@ RANE’s META and JIT bands will support:
 This enables patterns that are difficult or impossible in traditional AOT‑only languages.
 
 ---
+
+## Onboarding
+
+See `onboarding.md` for a detailed onboarding guide (build prerequisites, compiler pipeline, language syntax and examples, imports/link directives, testing workflow, and roadmap milestones).
+
+---
+
+## 13) Performance (current and trajectory)
+
+### Current performance characteristics
+- The compiler is a bootstrap toolchain focused on correctness and deterministic codegen.
+- Generated code is native x64 and runs at machine speed for the subset used.
+- Optimization passes exist but are intentionally small/limited in bootstrap:
+  - peephole MOV folding
+  - basic DCE
+  - (where implemented) constant folding / constexpr hooks
+
+### Expected future performance direction
+Performance will improve primarily via:
+- stronger SSA-based optimizations
+- better inlining/call reasoning
+- improved register allocation
+- more complete instruction selection and lowering
+- deterministic JIT specialization (roadmap)
+
+---
+
+## 14) Milestones / trajectory (roadmap)
+
+This is a practical milestone plan aligned with the existing repo direction.
+
+### Milestone 0 — Bootstrap compiler (current)
+- Working lexer/parser/typecheck/TIR/codegen/PE path
+- `.text/.rdata/.idata` emission
+- basic optimizations
+- basic tests in `tests/`
+
+### Milestone 1 — Imports, link hints, and stable FFI
+- Multiple-import `.idata` support
+- Per-symbol call fixups
+- C backend emits dllimport + pragma comment(lib)
+
+### Milestone 2 — Language usability expansion
+- More consistent statement grammar across “core” and “v1 node” surfaces
+- Better diagnostics
+- More predictable syntax for functions/procs and returns
+
+### Milestone 3 — Stronger type system groundwork
+- Explicit type annotations in source
+- User-defined types with deterministic layout
+- More robust type checking
+
+### Milestone 4 — Multi-stage + memory-band integration
+- Expand CORE/AOT/JIT/META/HEAP/MMAP semantics
+- Raise determinism guarantees and enforcement tools
+
+---
+
+## 15) Learning prerequisites and learning curve
+
+### Prerequisites
+- Comfortable reading C/C++ (for understanding the compiler implementation)
+- Basic familiarity with compilers/IR is helpful but not required
+- Basic Windows/native concepts help (PE, DLL imports)
+
+### Learning curve guidance
+Recommended path:
+1. Start with the v1 node surface examples in `tests/`
+2. Move to expressions and arithmetic
+3. Learn the `mmio` and memory helper surface (if needed)
+4. Finally learn native imports (`import … from "…"`) and linking hints (`link "…"`)
+
+---
+
+## 16) What can RANE make today?
+
+### Today
+- Small Windows x64 executables (single binary output)
+- Programs that:
+  - print simple strings (`say`)
+  - execute arithmetic and control flow
+  - perform limited memory operations via builtins
+  - call imported symbols from DLLs (bootstrap FFI path)
+
+### Later
+- richer systems programs with explicit types, safe/capability constrained operations,
+  and multi-stage compilation (AOT/JIT/META) with deterministic specialization.
+
+---
+
+## 17) Tests
+
+- `.rane` fixtures live under `tests/`
+- C++ unit tests exist (example: `rane_gc_tests.cpp`)
+
+Guideline:
+- For each new language feature, add at least one focused `.rane` test under `tests/`.
+
+---
+
+## 18) Quick troubleshooting
+
+### Parse errors
+- Check `rane_parser.cpp` `parse_stmt()` for what is currently accepted.
+- Use the error spans printed by the driver (`rane_driver.cpp`) for line/column.
+
+### Link/import issues
+- On the AOT/PE path, imports are from DLL+symbol only; `.lib` is not used.
+- On the C backend path, `link "foo.lib";` emits MSVC `#pragma comment(lib, ...)`.
+
+---
+
+### What these mean
+- `import <sym> from "<dll>";`
+  - Adds an import entry for `<dll>!<sym>` in the emitted PE `.idata`
+  - Call sites to `<sym>` are patched to use the corresponding IAT slot
+- `link "<lib>";`
+  - The C backend will emit `#pragma comment(lib, "<lib>")` when compiling under MSVC
+  - The AOT/PE path does not directly use `.lib` hints (PE import is driven by DLL + symbol)
+
+### When to use them
+- Use `import` when you want to call an external function by name from a DLL at runtime.
+- Use `link` only when using the **C backend** and compiling the emitted C with MSVC.
+
+---
+
+## 11) Keywords and tokens: source of truth
+
+### Current implemented semantics
+Not every token in the lexer has meaning (many are reserved for future).
+
+- For what is *tokenized*, see:
+  - `rane_lexer.cpp` → `identifier_type()`
+- For what is *parsed into AST*, see:
+  - `rane_parser.cpp` → `parse_stmt()` and expression parsing
+- For what is *lowered into TIR*, see:
+  - `rane_tir.cpp`
+
+Recommended workflow:
+- Treat the lexer keyword table as **reserved words**.
+- Treat `rane_parser.cpp` as the authoritative “what the language accepts today”。
+
+---
+
+## 12) Compiler pipeline (how it works)
+
+---
+
+# **Native imports and MSVC link hints (CURRENT)**
+
+RANE supports native imports and link hints as top-level directives:
+
+````````markdown
+import <sym> from "<dll>";
+say "hello, world";
+module my_module
+node main:
+  say "Entering main node"
+  halt
+end
+````````
+
+Semantics:
+- `module <name>` declares module context (bootstrap metadata)
+- `node <name>:` begins a node body, terminated by `end`
+- `say <expr>` prints a string/text in the bootstrap model
+- `halt` terminates execution
+- `start at node <name>` defines the entry node
+
+> Note: In this bootstrap, `say` currently prints via a runtime path wired into the backend(s). The exact imported function used depends on the current driver/backend configuration.
+
+---
+
