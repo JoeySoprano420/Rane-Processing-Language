@@ -680,3 +680,400 @@ Practical vertical slice:
   - C backend: `rane_c_backend.cpp`
 - Optimizations: `rane_optimize.cpp`
 - Tests: `tests/`
+
+
+**********
+
+
+IN SUMMARY:
+
+# **RANE Processing Language — Unified Specification (Bootstrap Edition)**  
+**Updated: 2026‑01‑05**
+
+RANE is a deterministic, statically typed, low‑level systems language with explicit memory operations, analyzable control flow, and a bootstrap‑friendly compiler pipeline. The current repository implements a complete end‑to‑end native toolchain targeting **Windows x64**, producing minimal **PE executables**.
+
+This document describes:
+
+1. **What RANE is today** (fully implemented features)  
+2. **How to build and use the compiler**  
+3. **The complete bootstrap language specification**  
+4. **The compiler pipeline and contributor reference**  
+5. **The long‑term vision and roadmap**
+
+Everything here reflects **actual implemented behavior** in the repository.
+
+---
+
+# **1. Project Scope (Bootstrap Phase)**
+
+The bootstrap compiler focuses on:
+
+- A minimal, deterministic language surface
+- A fully typed intermediate representation (TIR)
+- A direct x64 backend
+- A prototype multi‑band loader (CORE / AOT / JIT / META / HEAP / MMAP)
+- A clean, analyzable end‑to‑end pipeline
+
+Advanced features described in older documents (rich type system, full multi‑stage semantics, capsules, durations, privileges) are **planned**, not yet implemented.
+
+---
+
+# **2. What Works Today**
+
+Everything in this section is implemented and compiles end‑to‑end:
+
+**parse → typecheck → TIR → x64 → PE**
+
+### Supported surfaces
+RANE currently exposes two surfaces:
+
+1. **v1 Node/Prose Surface**  
+   A simple, narrative‑style syntax used for demos and onboarding:
+   - `module`
+   - `node … end`
+   - `say`
+   - `start at node`
+   - `go to node`
+   - `halt`
+
+2. **Low‑Level Bootstrap Surface**  
+   A deterministic, explicit systems surface:
+   - `mmio`, `read32`, `write32`
+   - `addr`, `load`, `store`
+   - `mem copy`
+   - `goto`, `jump`, `label`
+   - `call`, `trap`
+
+These surfaces coexist and compile through the same backend.
+
+---
+
+# **3. Building the Compiler**
+
+### Requirements
+- Visual Studio (C++14 or later)
+- Windows x64 environment
+
+### Build steps
+1. Open the solution: `Rane Processing Language.vcxproj`
+2. Select **Release | x64** (or **Debug | x64**)
+3. Build Solution
+
+---
+
+# **4. Using the Compiler**
+
+Compile a `.rane` file into a Windows executable:
+
+```
+Rane Processing Language.exe input.rane -o output.exe -O2
+```
+
+Supported optimization flags: `-O0`, `-O1`, `-O2`, `-O3`.
+
+### Emit C instead of machine code
+```
+Rane Processing Language.exe input.rane -emit-c
+```
+
+The generated C file can be compiled with MSVC or any compatible C compiler.
+
+---
+
+# **5. Language Specification (Bootstrap)**
+
+## 5.1 Tokens
+
+- **Identifiers:** `foo`, `_tmp`, `memcpy`
+- **Integers:** decimal, hex (`0x`), binary (`0b`), underscores allowed
+- **Strings:** `"hello"`
+- **Booleans:** `true`, `false`
+- **Operators:**
+  - Arithmetic: `+ - * / %`
+  - Bitwise: `& | ^ ~ << >>`
+  - Comparisons: `< <= > >= == !=`
+  - Logical: `and`, `or`, `&&`, `||`
+  - Ternary: `? :`
+- **Punctuation:** `;`, `{}`, `()`, `,`, `[]`, `.`
+
+---
+
+## 5.2 Types (Bootstrap)
+
+Types are inferred at the surface. Internally, the compiler uses:
+
+- `u64` — default integer type  
+- `b1` — boolean  
+- `p64` — pointer‑sized integer  
+- `text`, `bytes` — used by builtins like `print`
+
+---
+
+## 5.3 Expressions
+
+Fully supported:
+
+- Literals (`42`, `"hello"`, `true`)
+- Variables
+- Arithmetic and bitwise expressions
+- Comparisons (returning `0` or `1`)
+- Logical short‑circuiting
+- Ternary expressions
+- Calls: `foo(1, 2)`
+- Member access: `a.b`
+- Indexing: `a[i]`
+
+---
+
+## 5.4 Memory Builtins
+
+Lower directly into TIR:
+
+```
+addr(base, index, scale, disp)
+load(u64, addr(...))
+store(u64, addr(...), value)
+```
+
+Supported load/store types:  
+`u8 u16 u32 u64`, `i8 i16 i32 i64`, `p64`, `b1`
+
+---
+
+## 5.5 MMIO Helpers
+
+```
+mmio region UART from 0x1000 size 0x100;
+read32 UART, 0x0 into v;
+write32 UART, 0x0, 0x1;
+```
+
+---
+
+## 5.6 Memory Helpers
+
+```
+mem copy dst, src, size;
+```
+
+---
+
+## 5.7 Statements
+
+- `let x = expr;`
+- `x = expr;`
+- Blocks `{ ... }`
+- `if cond then stmt [else stmt]`
+- `while cond do stmt`
+- `return;` / `return expr;`
+
+### Low‑level control flow
+```
+label;
+jump label;
+goto cond -> true_label, false_label;
+```
+
+### Calls (bootstrap form)
+```
+call slot0, my_func, arg0, arg1;
+```
+
+### Trap
+```
+trap;
+```
+
+---
+
+## 5.8 v1 Node/Prose Surface
+
+```
+module example
+
+node main:
+  say "Hello"
+  halt
+end
+
+start at node main
+```
+
+Semantics:
+
+- `module <name>` — module metadata  
+- `node <name>:` … `end` — named block  
+- `say <expr>` — print text  
+- `go to node <name>` — jump to another node  
+- `halt` — terminate execution  
+- `start at node <name>` — entrypoint  
+
+---
+
+## 5.9 Imports and Link Hints
+
+### Native imports (PE backend)
+```
+import printf from "msvcrt.dll";
+```
+
+- Adds an `.idata` entry for the DLL + symbol  
+- Call sites are patched to the IAT slot
+
+### Link hints (C backend only)
+```
+link "user32.lib";
+```
+
+- Emits `#pragma comment(lib, "user32.lib")` in generated C
+
+---
+
+# **6. Compiler Pipeline**
+
+The bootstrap compiler implements:
+
+1. **Lexing** (`rane_lexer.cpp`)
+2. **Parsing** (`rane_parser.cpp`)
+3. **AST construction** (`rane_ast.h`)
+4. **Type checking** (`rane_typecheck.cpp`)
+5. **Lowering to TIR** (`rane_tir.cpp`)
+6. **Optimizations**  
+   - peephole MOV folding  
+   - basic dead‑code elimination  
+7. **Backends**
+   - x64 + PE writer (`rane_x64.cpp`, `rane_driver.cpp`)
+   - C backend (`rane_c_backend.cpp`)
+8. **Tests** (`tests/`)
+
+The parser (`parse_stmt()`) is the authoritative grammar.
+
+---
+
+# **7. Troubleshooting**
+
+### Parse errors
+- Check `parse_stmt()` for accepted syntax  
+- Use driver‑printed line/column spans
+
+### Import/link issues
+- PE backend uses DLL + symbol only  
+- C backend uses `#pragma comment(lib, ...)`
+
+---
+
+# **8. What You Can Build Today**
+
+- Small Windows x64 executables
+- Programs using:
+  - arithmetic and control flow
+  - node/prose scripting
+  - explicit memory operations
+  - MMIO
+  - native DLL imports
+
+---
+
+# **9. Roadmap**
+
+## Milestone 0 — Bootstrap (current)
+- Working lexer/parser/typechecker/TIR/codegen/PE
+- Basic optimizations
+- Tests
+
+## Milestone 1 — Imports & FFI
+- Multiple‑import `.idata` support
+- Per‑symbol fixups
+- Improved C backend import emission
+
+## Milestone 2 — Language Usability
+- More consistent statement grammar
+- Better diagnostics
+- Clearer function/proc syntax
+
+## Milestone 3 — Type System Expansion
+- Explicit type annotations
+- User‑defined types with deterministic layout
+- Stronger type checking
+
+## Milestone 4 — Multi‑Stage + Memory Bands
+- Full CORE/AOT/JIT/META/HEAP/MMAP semantics
+- Determinism enforcement tools
+
+---
+
+# **10. Long‑Term Vision**
+
+RANE aims to evolve into a deterministic, capability‑oriented, multi‑stage systems language with:
+
+### 1. Rich, explicit type system
+- Type annotations  
+- Records, enums, tagged unions  
+- Capsules (state + behavior units)  
+- Containers with predictable layout  
+- Qualifiers for purity and determinism  
+- `specify` clauses for contracts  
+
+### 2. Durations, privileges, and capabilities
+- Explicit lifetimes  
+- Privilege‑scoped operations  
+- Static capability lattice  
+
+### 3. Full memory‑band architecture
+- **CORE** — trusted code  
+- **AOT** — ahead‑of‑time modules  
+- **JIT** — deterministic specialization  
+- **META** — compile‑time execution  
+- **HEAP** — dynamic allocations  
+- **MMAP** — device memory  
+
+### 4. High‑performance native execution
+- SSA optimizations  
+- Inlining, LTO, PGO  
+- SIMD lowering  
+- Loop optimizations  
+- Full register allocator  
+- Deterministic JIT  
+
+### 5. Self‑hosting
+- Compiler written in RANE  
+- Faster iteration  
+- Cleaner codebase  
+
+### 6. Deterministic multi‑stage programming
+- Compile‑time codegen  
+- Runtime specialization  
+- Safe DSLs  
+- High‑performance pipelines  
+
+---
+
+# **11. Contributor Guide**
+
+To add a new feature:
+
+1. Add token (lexer)  
+2. Parse into AST  
+3. Add AST node  
+4. Typecheck  
+5. Lower to TIR  
+6. Optimize  
+7. Codegen + fixups  
+8. Add a `.rane` test  
+
+---
+
+# **12. Reference: File Map**
+
+- **Lexer:** `rane_lexer.cpp`  
+- **Parser:** `rane_parser.cpp`  
+- **AST:** `rane_ast.h`  
+- **Typechecker:** `rane_typecheck.cpp`  
+- **TIR:** `rane_tir.cpp`  
+- **Optimizations:** `rane_optimize.cpp`  
+- **x64 backend:** `rane_x64.cpp`  
+- **Driver:** `rane_driver.cpp`  
+- **C backend:** `rane_c_backend.cpp`  
+- **Tests:** `tests/`  
+
+---
