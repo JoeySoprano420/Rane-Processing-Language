@@ -1,6 +1,8 @@
 # **RANE Processing Language**
 **Updated: 1/5/2026**
 
+RANE is a deterministic, statically typed, low‑level systems language with compile‑time execution, explicit foreign boundaries, and a ritualized emphasis on clarity and analyzability.
+
 RANE is an experimental programming language and native‑code toolchain written in C++14.  
 The current repository contains a **bootstrap compiler** targeting **Windows x64**, producing a minimal **PE executable**. The focus of this stage is correctness, determinism, and a clean end‑to‑end pipeline.
 
