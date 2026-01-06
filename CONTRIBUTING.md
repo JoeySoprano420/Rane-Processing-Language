@@ -42,7 +42,7 @@ When adding features:
 - Use `nullptr` in C++ where applicable.
 - Keep functions `static` when they are translation-unit local.
 - Prefer explicit initialization (`memset`/`calloc`/value-init) as used in the codebase.
-- Use the project’s existing error/diagnostic types (`rane_error_t`, `rane_diag_t`, `rane_diag_code_t`).
+- Use the projectâ€™s existing error/diagnostic types (`rane_error_t`, `rane_diag_t`, `rane_diag_code_t`).
 
 ### Diagnostics & Errors
 - When introducing new parse/typecheck errors, prefer:

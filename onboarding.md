@@ -6,11 +6,11 @@ This document is the canonical onboarding guide for the RANE bootstrap compiler 
 It covers:
 
 - What RANE is (today vs planned)
-- Who it’s for / where it fits
+- Who itâ€™s for / where it fits
 - Build + run instructions (Visual Studio 2026)
 - How to compile `.rane` programs to EXEs and/or C
 - Current language surface area (supported syntax)
-- Native imports and MSVC link hints (`import … from "…";`, `link "…";`)
+- Native imports and MSVC link hints (`import â€¦ from "â€¦";`, `link "â€¦";`)
 - How the compiler pipeline works internally
 - Roadmap milestones and performance trajectory
 - Where to look for the authoritative keyword/token list
@@ -18,8 +18,8 @@ It covers:
 > Scope note
 >
 > RANE is evolving rapidly. This doc is written to be **accurate and maintainable**:
-> - “Current” sections reflect what this repo’s compiler can actually parse/lower/compile today.
-> - “Planned” sections describe the trajectory but avoid claiming semantics that aren’t implemented yet.
+> - â€œCurrentâ€ sections reflect what this repoâ€™s compiler can actually parse/lower/compile today.
+> - â€œPlannedâ€ sections describe the trajectory but avoid claiming semantics that arenâ€™t implemented yet.
 > - The authoritative list of tokenized/reserved keywords is `rane_lexer.cpp` (`identifier_type()`).
 
 ---
