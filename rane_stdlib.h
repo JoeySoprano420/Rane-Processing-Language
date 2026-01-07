@@ -21,14 +21,26 @@ double rane_sin(double x);
 double rane_cos(double x);
 double rane_pow(double base, double exp);
 
-// Containers (stub)
+// Containers
 typedef struct rane_vector_s {
-  void* data;
+  void** data;
   size_t size;
+  size_t capacity;
 } rane_vector_t;
 
 void rane_vector_init(rane_vector_t* v);
+void rane_vector_free(rane_vector_t* v);
+void rane_vector_clear(rane_vector_t* v);
+
+void rane_vector_reserve(rane_vector_t* v, size_t capacity);
 void rane_vector_push(rane_vector_t* v, void* item);
+void* rane_vector_pop(rane_vector_t* v);
+
+void* rane_vector_get(const rane_vector_t* v, size_t index);
+void rane_vector_set(rane_vector_t* v, size_t index, void* item);
+
+void rane_vector_insert(rane_vector_t* v, size_t index, void* item);
+void* rane_vector_remove_at(rane_vector_t* v, size_t index);
 
 // Sorting
 void rane_sort_int(int* arr, size_t n);
