@@ -22,6 +22,8 @@
 #include <filesystem>
 #include <cctype>
 #include <random>
+#include <iomanip>
+#include <type_traits>
 
 // --- Syntax/Grammar: AST node base for extensible processing ---
 struct ProcessorASTNode {
@@ -537,5 +539,381 @@ std::string processor_format(const std::string& src) {
 }
 
 // --- End of supplementary features ---
+
+// --- Additional: More syntax, grammar, capabilities, tooling, techniques, features, assets, and optimizations ---
+// All additions are non-breaking and do not interfere with any existing code or logic.
+
+#include <iomanip>
+#include <type_traits>
+
+// --- Feature: AST node for types (for type-aware analysis) ---
+struct ProcessorTypeNode : public ProcessorASTNode {
+    std::string type_name;
+    std::vector<ProcessorASTNodePtr> params;
+    ProcessorTypeNode(const std::string& t, const std::vector<ProcessorASTNodePtr>& p = {})
+        : type_name(t), params(p) {}
+    void print(std::ostream& os, int indent = 0) const override {
+        os << std::string(indent, ' ') << "Type: " << type_name << "\n";
+        for (const auto& c : params) c->print(os, indent + 2);
+    }
+    void accept(class ProcessorASTVisitor& v) const override;
+};
+
+// --- Feature: AST node for literals (for richer grammar) ---
+struct ProcessorLiteralNode : public ProcessorASTNode {
+    std::string literal;
+    ProcessorLiteralNode(const std::string& l) : literal(l) {}
+    void print(std::ostream& os, int indent = 0) const override {
+        os << std::string(indent, ' ') << "Literal: " << literal << "\n";
+    }
+    void accept(class ProcessorASTVisitor& v) const override;
+};
+
+// --- Visitor extension for new node types ---
+struct ProcessorASTVisitorExt : public ProcessorASTVisitor {
+    virtual void visit(const ProcessorTypeNode& node) {}
+    virtual void visit(const ProcessorLiteralNode& node) {}
+};
+void ProcessorTypeNode::accept(ProcessorASTVisitor& v) const {
+    if (auto* ext = dynamic_cast<ProcessorASTVisitorExt*>(&v)) ext->visit(*this);
+    else v.visit(*this);
+}
+void ProcessorLiteralNode::accept(ProcessorASTVisitor& v) const {
+    if (auto* ext = dynamic_cast<ProcessorASTVisitorExt*>(&v)) ext->visit(*this);
+    else v.visit(*this);
+}
+
+// --- Feature: AST node for comments (for round-trip formatting) ---
+struct ProcessorCommentNode : public ProcessorASTNode {
+    std::string text;
+    ProcessorCommentNode(const std::string& t) : text(t) {}
+    void print(std::ostream& os, int indent = 0) const override {
+        os << std::string(indent, ' ') << "Comment: " << text << "\n";
+    }
+    void accept(class ProcessorASTVisitor& v) const override { v.visit(*this); }
+};
+
+// --- Feature: AST node for preprocessor directives ---
+struct ProcessorPreprocNode : public ProcessorASTNode {
+    std::string directive;
+    ProcessorPreprocNode(const std::string& d) : directive(d) {}
+    void print(std::ostream& os, int indent = 0) const override {
+        os << std::string(indent, ' ') << "Preproc: " << directive << "\n";
+    }
+    void accept(class ProcessorASTVisitor& v) const override { v.visit(*this); }
+};
+
+// --- Feature: AST node for error recovery (for robust parsing) ---
+struct ProcessorErrorNode : public ProcessorASTNode {
+    std::string error;
+    ProcessorErrorNode(const std::string& e) : error(e) {}
+    void print(std::ostream& os, int indent = 0) const override {
+        os << std::string(indent, ' ') << "Error: " << error << "\n";
+    }
+    void accept(class ProcessorASTVisitor& v) const override { v.visit(*this); }
+};
+
+// --- Feature: Grammar rule for type parsing (demo) ---
+void processor_register_type_rule() {
+    processor_register_rule("type", [](ProcessorParser& p, ProcessorASTNodePtr& out) {
+        if (!p.at_end() && (p.peek() == "u32" || p.peek() == "i32" || p.peek() == "string")) {
+            out = std::make_shared<ProcessorTypeNode>(p.peek());
+            p.match(p.peek());
+            return true;
+        }
+        return false;
+    });
+}
+
+// --- Feature: Grammar rule for literal parsing (demo) ---
+void processor_register_literal_rule() {
+    processor_register_rule("literal", [](ProcessorParser& p, ProcessorASTNodePtr& out) {
+        if (!p.at_end() && (p.peek().size() > 0 && (p.peek()[0] == '"' || isdigit(p.peek()[0])))) {
+            out = std::make_shared<ProcessorLiteralNode>(p.peek());
+            p.match(p.peek());
+            return true;
+        }
+        return false;
+    });
+}
+
+// --- Feature: Grammar rule for comment parsing (demo) ---
+void processor_register_comment_rule() {
+    processor_register_rule("comment", [](ProcessorParser& p, ProcessorASTNodePtr& out) {
+        if (!p.at_end() && p.peek().rfind("//", 0) == 0) {
+            out = std::make_shared<ProcessorCommentNode>(p.peek());
+            p.match(p.peek());
+            return true;
+        }
+        return false;
+    });
+}
+
+// --- Feature: Grammar rule for preprocessor parsing (demo) ---
+void processor_register_preproc_rule() {
+    processor_register_rule("preproc", [](ProcessorParser& p, ProcessorASTNodePtr& out) {
+        if (!p.at_end() && p.peek().size() > 0 && p.peek()[0] == '#') {
+            out = std::make_shared<ProcessorPreprocNode>(p.peek());
+            p.match(p.peek());
+            return true;
+        }
+        return false;
+    });
+}
+
+// --- Feature: Register all extended rules ---
+void processor_register_all_rules() {
+    processor_register_builtin_rules();
+    processor_register_type_rule();
+    processor_register_literal_rule();
+    processor_register_comment_rule();
+    processor_register_preproc_rule();
+}
+
+// --- Feature: AST node graph visualization (DOT format) ---
+void processor_ast_to_dot(const ProcessorASTNodePtr& node, std::ostream& os, int& id, int parent = -1) {
+    if (!node) return;
+    int my_id = id++;
+    os << "  n" << my_id << " [label=\"";
+    node->print(os, 0);
+    os << "\"];\n";
+    if (parent >= 0) os << "  n" << parent << " -> n" << my_id << ";\n";
+    auto expr = std::dynamic_pointer_cast<ProcessorExprNode>(node);
+    auto stmt = std::dynamic_pointer_cast<ProcessorStmtNode>(node);
+    auto type = std::dynamic_pointer_cast<ProcessorTypeNode>(node);
+    if (expr) for (const auto& c : expr->children) processor_ast_to_dot(c, os, id, my_id);
+    if (stmt) for (const auto& c : stmt->children) processor_ast_to_dot(c, os, id, my_id);
+    if (type) for (const auto& c : type->params) processor_ast_to_dot(c, os, id, my_id);
+}
+
+// --- Feature: AST node count utility ---
+size_t processor_ast_count(const ProcessorASTNodePtr& node) {
+    if (!node) return 0;
+    size_t count = 1;
+    auto expr = std::dynamic_pointer_cast<ProcessorExprNode>(node);
+    auto stmt = std::dynamic_pointer_cast<ProcessorStmtNode>(node);
+    auto type = std::dynamic_pointer_cast<ProcessorTypeNode>(node);
+    if (expr) for (const auto& c : expr->children) count += processor_ast_count(c);
+    if (stmt) for (const auto& c : stmt->children) count += processor_ast_count(c);
+    if (type) for (const auto& c : type->params) count += processor_ast_count(c);
+    return count;
+}
+
+// --- Feature: AST depth utility ---
+size_t processor_ast_depth(const ProcessorASTNodePtr& node) {
+    if (!node) return 0;
+    size_t maxd = 0;
+    auto expr = std::dynamic_pointer_cast<ProcessorExprNode>(node);
+    auto stmt = std::dynamic_pointer_cast<ProcessorStmtNode>(node);
+    auto type = std::dynamic_pointer_cast<ProcessorTypeNode>(node);
+    if (expr) for (const auto& c : expr->children) maxd = std::max(maxd, processor_ast_depth(c));
+    if (stmt) for (const auto& c : stmt->children) maxd = std::max(maxd, processor_ast_depth(c));
+    if (type) for (const auto& c : type->params) maxd = std::max(maxd, processor_ast_depth(c));
+    return 1 + maxd;
+}
+
+// --- Feature: AST pretty-printer with color (for terminals) ---
+void processor_print_ast_color(const ProcessorASTNodePtr& node, int indent = 0) {
+    if (!node) return;
+    auto expr = std::dynamic_pointer_cast<ProcessorExprNode>(node);
+    auto stmt = std::dynamic_pointer_cast<ProcessorStmtNode>(node);
+    auto type = std::dynamic_pointer_cast<ProcessorTypeNode>(node);
+    auto lit = std::dynamic_pointer_cast<ProcessorLiteralNode>(node);
+    auto attr = std::dynamic_pointer_cast<ProcessorAttrNode>(node);
+    auto comment = std::dynamic_pointer_cast<ProcessorCommentNode>(node);
+    auto preproc = std::dynamic_pointer_cast<ProcessorPreprocNode>(node);
+    auto err = std::dynamic_pointer_cast<ProcessorErrorNode>(node);
+    std::string ind(indent, ' ');
+    if (expr) {
+        std::cout << ind << "\033[36mExpr: " << expr->value << "\033[0m\n";
+        for (const auto& c : expr->children) processor_print_ast_color(c, indent + 2);
+    } else if (stmt) {
+        std::cout << ind << "\033[35mStmt: " << stmt->kind << "\033[0m\n";
+        for (const auto& c : stmt->children) processor_print_ast_color(c, indent + 2);
+    } else if (type) {
+        std::cout << ind << "\033[33mType: " << type->type_name << "\033[0m\n";
+        for (const auto& c : type->params) processor_print_ast_color(c, indent + 2);
+    } else if (lit) {
+        std::cout << ind << "\033[32mLiteral: " << lit->literal << "\033[0m\n";
+    } else if (attr) {
+        std::cout << ind << "\033[34mAttr: @" << attr->name << "\033[0m\n";
+    } else if (comment) {
+        std::cout << ind << "\033[90mComment: " << comment->text << "\033[0m\n";
+    } else if (preproc) {
+        std::cout << ind << "\033[95mPreproc: " << preproc->directive << "\033[0m\n";
+    } else if (err) {
+        std::cout << ind << "\033[91mError: " << err->error << "\033[0m\n";
+    } else {
+        std::cout << ind << "UnknownNode\n";
+    }
+}
+
+// --- Feature: AST error node creation utility ---
+ProcessorASTNodePtr processor_make_error_node(const std::string& msg) {
+    return std::make_shared<ProcessorErrorNode>(msg);
+}
+
+// --- Feature: AST node hashing (for deduplication/caching) ---
+size_t processor_ast_hash(const ProcessorASTNodePtr& node) {
+    if (!node) return 0;
+    std::hash<std::string> h;
+    size_t result = 0;
+    auto expr = std::dynamic_pointer_cast<ProcessorExprNode>(node);
+    auto stmt = std::dynamic_pointer_cast<ProcessorStmtNode>(node);
+    auto type = std::dynamic_pointer_cast<ProcessorTypeNode>(node);
+    if (expr) {
+        result ^= h(expr->value);
+        for (const auto& c : expr->children) result ^= processor_ast_hash(c);
+    } else if (stmt) {
+        result ^= h(stmt->kind);
+        for (const auto& c : stmt->children) result ^= processor_ast_hash(c);
+    } else if (type) {
+        result ^= h(type->type_name);
+        for (const auto& c : type->params) result ^= processor_ast_hash(c);
+    }
+    return result;
+}
+
+// --- Feature: AST node equality (for testing/analysis) ---
+bool processor_ast_equal(const ProcessorASTNodePtr& a, const ProcessorASTNodePtr& b) {
+    if (!a || !b) return a == b;
+    if (typeid(*a) != typeid(*b)) return false;
+    auto ea = std::dynamic_pointer_cast<ProcessorExprNode>(a);
+    auto eb = std::dynamic_pointer_cast<ProcessorExprNode>(b);
+    if (ea && eb) {
+        if (ea->value != eb->value || ea->children.size() != eb->children.size()) return false;
+        for (size_t i = 0; i < ea->children.size(); ++i)
+            if (!processor_ast_equal(ea->children[i], eb->children[i])) return false;
+        return true;
+    }
+    auto sa = std::dynamic_pointer_cast<ProcessorStmtNode>(a);
+    auto sb = std::dynamic_pointer_cast<ProcessorStmtNode>(b);
+    if (sa && sb) {
+        if (sa->kind != sb->kind || sa->children.size() != sb->children.size()) return false;
+        for (size_t i = 0; i < sa->children.size(); ++i)
+            if (!processor_ast_equal(sa->children[i], sb->children[i])) return false;
+        return true;
+    }
+    auto ta = std::dynamic_pointer_cast<ProcessorTypeNode>(a);
+    auto tb = std::dynamic_pointer_cast<ProcessorTypeNode>(b);
+    if (ta && tb) {
+        if (ta->type_name != tb->type_name || ta->params.size() != tb->params.size()) return false;
+        for (size_t i = 0; i < ta->params.size(); ++i)
+            if (!processor_ast_equal(ta->params[i], tb->params[i])) return false;
+        return true;
+    }
+    return false;
+}
+
+// --- Feature: AST node pretty-printer to HTML (for web tooling) ---
+void processor_ast_to_html(const ProcessorASTNodePtr& node, std::ostream& os, int indent = 0) {
+    if (!node) return;
+    auto expr = std::dynamic_pointer_cast<ProcessorExprNode>(node);
+    auto stmt = std::dynamic_pointer_cast<ProcessorStmtNode>(node);
+    auto type = std::dynamic_pointer_cast<ProcessorTypeNode>(node);
+    auto lit = std::dynamic_pointer_cast<ProcessorLiteralNode>(node);
+    auto attr = std::dynamic_pointer_cast<ProcessorAttrNode>(node);
+    auto comment = std::dynamic_pointer_cast<ProcessorCommentNode>(node);
+    auto preproc = std::dynamic_pointer_cast<ProcessorPreprocNode>(node);
+    auto err = std::dynamic_pointer_cast<ProcessorErrorNode>(node);
+    std::string ind(indent * 2, ' ');
+    if (expr) {
+        os << ind << "<span class='expr'>Expr: " << expr->value << "</span><br/>\n";
+        for (const auto& c : expr->children) processor_ast_to_html(c, os, indent + 1);
+    } else if (stmt) {
+        os << ind << "<span class='stmt'>Stmt: " << stmt->kind << "</span><br/>\n";
+        for (const auto& c : stmt->children) processor_ast_to_html(c, os, indent + 1);
+    } else if (type) {
+        os << ind << "<span class='type'>Type: " << type->type_name << "</span><br/>\n";
+        for (const auto& c : type->params) processor_ast_to_html(c, os, indent + 1);
+    } else if (lit) {
+        os << ind << "<span class='literal'>Literal: " << lit->literal << "</span><br/>\n";
+    } else if (attr) {
+        os << ind << "<span class='attr'>Attr: @" << attr->name << "</span><br/>\n";
+    } else if (comment) {
+        os << ind << "<span class='comment'>Comment: " << comment->text << "</span><br/>\n";
+    } else if (preproc) {
+        os << ind << "<span class='preproc'>Preproc: " << preproc->directive << "</span><br/>\n";
+    } else if (err) {
+        os << ind << "<span class='error'>Error: " << err->error << "</span><br/>\n";
+    } else {
+        os << ind << "<span class='unknown'>UnknownNode</span><br/>\n";
+    }
+}
+
+// --- Feature: AST statistics (node type histogram) ---
+std::map<std::string, size_t> processor_ast_histogram(const ProcessorASTNodePtr& node) {
+    std::map<std::string, size_t> hist;
+    std::function<void(const ProcessorASTNodePtr&)> walk = [&](const ProcessorASTNodePtr& n) {
+        if (!n) return;
+        std::string t = typeid(*n).name();
+        hist[t]++;
+        auto expr = std::dynamic_pointer_cast<ProcessorExprNode>(n);
+        auto stmt = std::dynamic_pointer_cast<ProcessorStmtNode>(n);
+        auto type = std::dynamic_pointer_cast<ProcessorTypeNode>(n);
+        if (expr) for (const auto& c : expr->children) walk(c);
+        if (stmt) for (const auto& c : stmt->children) walk(c);
+        if (type) for (const auto& c : type->params) walk(c);
+    };
+    walk(node);
+    return hist;
+}
+
+// --- Feature: AST random generator (for fuzzing/robustness) ---
+ProcessorASTNodePtr processor_generate_random_ast(size_t depth = 3) {
+    static const std::vector<std::string> exprs = {"+", "-", "*", "/", "call", "id", "val"};
+    static const std::vector<std::string> stmts = {"let", "if", "while", "return"};
+    static std::mt19937 rng((unsigned)std::chrono::system_clock::now().time_since_epoch().count());
+    if (depth == 0) {
+        return std::make_shared<ProcessorLiteralNode>(std::to_string(rng() % 100));
+    }
+    if (rng() % 2) {
+        std::vector<ProcessorASTNodePtr> kids;
+        for (size_t i = 0; i < (rng() % 3); ++i)
+            kids.push_back(processor_generate_random_ast(depth - 1));
+        return std::make_shared<ProcessorExprNode>(exprs[rng() % exprs.size()], kids);
+    } else {
+        std::vector<ProcessorASTNodePtr> kids;
+        for (size_t i = 0; i < (rng() % 2); ++i)
+            kids.push_back(processor_generate_random_ast(depth - 1));
+        return std::make_shared<ProcessorStmtNode>(stmts[rng() % stmts.size()], kids);
+    }
+}
+
+// --- Feature: AST deep copy utility ---
+ProcessorASTNodePtr processor_ast_deep_copy(const ProcessorASTNodePtr& node) {
+    if (!node) return nullptr;
+    auto expr = std::dynamic_pointer_cast<ProcessorExprNode>(node);
+    if (expr) {
+        std::vector<ProcessorASTNodePtr> kids;
+        for (const auto& c : expr->children) kids.push_back(processor_ast_deep_copy(c));
+        return std::make_shared<ProcessorExprNode>(expr->value, kids);
+    }
+    auto stmt = std::dynamic_pointer_cast<ProcessorStmtNode>(node);
+    if (stmt) {
+        std::vector<ProcessorASTNodePtr> kids;
+        for (const auto& c : stmt->children) kids.push_back(processor_ast_deep_copy(c));
+        return std::make_shared<ProcessorStmtNode>(stmt->kind, kids);
+    }
+    auto type = std::dynamic_pointer_cast<ProcessorTypeNode>(node);
+    if (type) {
+        std::vector<ProcessorASTNodePtr> kids;
+        for (const auto& c : type->params) kids.push_back(processor_ast_deep_copy(c));
+        return std::make_shared<ProcessorTypeNode>(type->type_name, kids);
+    }
+    auto lit = std::dynamic_pointer_cast<ProcessorLiteralNode>(node);
+    if (lit) return std::make_shared<ProcessorLiteralNode>(lit->literal);
+    auto attr = std::dynamic_pointer_cast<ProcessorAttrNode>(node);
+    if (attr) return std::make_shared<ProcessorAttrNode>(attr->name, attr->args);
+    auto comment = std::dynamic_pointer_cast<ProcessorCommentNode>(node);
+    if (comment) return std::make_shared<ProcessorCommentNode>(comment->text);
+    auto preproc = std::dynamic_pointer_cast<ProcessorPreprocNode>(node);
+    if (preproc) return std::make_shared<ProcessorPreprocNode>(preproc->directive);
+    auto err = std::dynamic_pointer_cast<ProcessorErrorNode>(node);
+    if (err) return std::make_shared<ProcessorErrorNode>(err->error);
+    return nullptr;
+}
+
+// --- End of additional features ---
 
 // (existing code remains unchanged below)
