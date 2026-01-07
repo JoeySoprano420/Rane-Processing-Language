@@ -29,6 +29,7 @@ Typical workflows:
 When adding features:
 - Add at least one focused test under `tests/`.
 - Prefer small, single-purpose `.rane` fixtures that demonstrate the new syntax/behavior.
+- Large feature work must be split into small, reviewable vertical slices (parser→lowering→codegen) with tests per slice.
 
 ## Coding Standards
 
@@ -76,22 +77,3 @@ When reporting a bug, include:
 - Expected vs actual behavior
 - If applicable, the diagnostic message and span
 - Visual Studio build configuration and any relevant logs
-
-````````
-
-This is the code block that represents the suggested code change:
-
-````````markdown
-let x: u64 = 40 + 2;
-ping(x, x * 3);
-weight(0, x + 1);
-say "ok";
-````````
-
-
-# Response
-````````markdown
-let x: u64 = 40 + 2;
-ping(x, x * 3);
-weight(0, x + 1);
-say "ok";
