@@ -678,4 +678,71 @@ Long-term direction (planned):
 - full memory-band integration (CORE/AOT/JIT/META/HEAP/MMAP)
 - deterministic multi-stage programming
 
----
+---What works today (implemented + exercised by tests)
+Core / bootstrap surface
+•	Lexing
+•	identifiers, integers (decimal/hex/binary with _), text literals ("..."), booleans, null
+•	operators: arithmetic, bitwise, comparisons, logical (and/or and &&/||), ternary ?:
+•	punctuation: ; { } ( ) , [ ] . : ?, plus ->, <-, =>, ::, #
+•	Expressions
+•	literals, variables
+•	unary -, not/!, ~
+•	binary arithmetic/bitwise/compare/logical (precedence-aware)
+•	ternary cond ? a : b
+•	calls: foo(1, 2), and call-on-expression (expr)(...)
+•	member b, index a[i]
+•	identifier literal #symbol
+•	Statements
+•	blocks { ... }
+•	let x = expr;
+•	x = expr; and _ = expr; (discard)
+•	if / while
+•	return; / return expr;
+•	low-level control flow: label;, jump label;, goto cond -> t, f;
+•	break / Continue tokens/AST exist (README says “treat as implemented if present in parse paths”)
+•	Built-in memory primitives (lower directly to TIR)
+•	addr(base, index, scale, disp)
+•	load(type, addr)
+•	store(type, addr, value)
+•	MMIO helpers
+•	mmio region NAME from BASE size SIZE;
+•	read32 NAME, off into v;
+•	write32 NAME, off, value;
+•	Bulk memory
+•	mem copy dst, src, size;
+•	Zones
+•	zone hot { ... } (treated like a normal block for now)
+•	Imports / exports
+•	import sys.alloc; (also acts as a policy/capability gate)
+•	export my_symbol;
+•	Output
+•	core surface print(...) lowers to runtime import rane_rt_print
+•	PE import is currently backed by msvcrt.dll!printf (bootstrap mapping)
+v1 prose/node surface (also implemented)
+Covered by hello_v1_nodes.rane and v1_struct_basic.rane:
+•	module <name>;
+•	node <name>: … end
+•	say <expr> (typechecked: text|bytes)
+•	halt
+•	start at node <name>
+•	optional go to node <name>
+v1 structs / data model
+•	struct Point { x: i32, y: i32 } (struct declarations + literals supported as described)
+•	struct literals Point { x: 10, y: 20 }
+•	Set / add forms as used by the v1 tests
+•	allocation strategy is deterministic:
+•	stack allocation preferred
+•	heap allocation only when import sys.alloc; is present
+•	text/bytes literals emitted into .rdata
+Backends / toolchain features that exist
+•	Typed IR (TIR) plus SSA + regalloc stages
+•	x64 codegen for Windows
+•	PE writer emitting Text, .rdata, iData
+•	.rdata emission via TIR_DATA_* directives and TIR_ADDR_OF patching
+•	bootstrap optimizations: peephole mov folding + basic DCE (plus more small passes in rane_optimize.cpp)
+Best “truth source” tests
+•	exhaustive_exprs.rane (expressions + memory + MMIO)
+•	hello_v1_nodes.rane (node surface)
+•	v1_struct_basic.rane (structs + set/add + say/halt)
+
+
