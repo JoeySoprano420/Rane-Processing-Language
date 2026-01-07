@@ -29,8 +29,11 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <bcrypt.h>
 
 #include <iostream>
+
+#pragma comment(lib, "bcrypt.lib")
 
 typedef struct rane_cli_options_s {
   const char* input_path;
@@ -54,6 +57,14 @@ typedef struct rane_cli_options_s {
 
   int run_after;          // run the produced exe
   int emit_and_run;       // compile then run (exe only)
+
+  // New: OS tooling
+  int os_info;
+  const char* env_name;
+  int print_cwd;
+  const char* cat_path;
+  const char* sha256_path;
+  const char* run_args;   // string passed as-is to child process
 
   int show_help;
   int show_version;
@@ -91,7 +102,15 @@ static void rane_print_help() {
   printf("  (default)                Compile to exe (PE x64)\n");
   printf("  -emit-c                  Compile to portable C (out.c)\n");
   printf("  --run                    Run an existing exe (requires <input.exe>)\n");
+  printf("  --run --args \"...\"       Run an existing exe with arguments\n");
   printf("  --emit-and-run           Compile to exe, then run it\n");
+  printf("\n");
+  printf("OS tools:\n");
+  printf("  --os-info                Print OS/CPU/memory info (Win32)\n");
+  printf("  --cwd                    Print current directory\n");
+  printf("  --env <NAME>             Print environment variable\n");
+  printf("  --cat <path>             Dump file to stdout (Win32 streaming)\n");
+  printf("  --sha256 <path>          SHA-256 hash a file (CNG/BCrypt)\n");
   printf("\n");
   printf("Analysis modes:\n");
   printf("  --lex                    Tokenize and print tokens\n");
@@ -168,6 +187,34 @@ static int rane_cli_parse(int argc, char** argv, rane_cli_options_t* out) {
     if (rane_streq(a, "--run")) { out->run_after = 1; continue; }
     if (rane_streq(a, "--emit-and-run")) { out->emit_and_run = 1; continue; }
 
+    // OS tools
+    if (rane_streq(a, "--os-info")) { out->os_info = 1; continue; }
+    if (rane_streq(a, "--cwd")) { out->print_cwd = 1; continue; }
+
+    if (rane_streq(a, "--env")) {
+      if (i + 1 >= argc) return 0;
+      out->env_name = argv[++i];
+      continue;
+    }
+
+    if (rane_streq(a, "--cat")) {
+      if (i + 1 >= argc) return 0;
+      out->cat_path = argv[++i];
+      continue;
+    }
+
+    if (rane_streq(a, "--sha256")) {
+      if (i + 1 >= argc) return 0;
+      out->sha256_path = argv[++i];
+      continue;
+    }
+
+    if (rane_streq(a, "--args")) {
+      if (i + 1 >= argc) return 0;
+      out->run_args = argv[++i];
+      continue;
+    }
+
     int lvl = 0;
     if (rane_parse_opt_level(a, &lvl)) {
       out->opt_level = lvl;
@@ -217,6 +264,217 @@ static int rane_read_entire_file(const char* path, char** out_buf, size_t* out_l
   return 1;
 }
 
+// ---------------------------
+// Optimized ABI: OS wrappers (C ABI, no exceptions)
+// ---------------------------
+extern "C" {
+
+typedef struct rane_os_buf_s {
+  void* data;
+  size_t len;
+} rane_os_buf_t;
+
+static void rane_os_buf_free(rane_os_buf_t* b) {
+  if (!b) return;
+  if (b->data) HeapFree(GetProcessHeap(), 0, b->data);
+  b->data = NULL;
+  b->len = 0;
+}
+
+static int rane_os_read_file(const char* path, rane_os_buf_t* out) {
+  if (out) { out->data = NULL; out->len = 0; }
+  if (!path || !out) return 0;
+
+  HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (h == INVALID_HANDLE_VALUE) return 0;
+
+  LARGE_INTEGER sz;
+  if (!GetFileSizeEx(h, &sz) || sz.QuadPart < 0 || (unsigned long long)sz.QuadPart > (unsigned long long)SIZE_MAX) {
+    CloseHandle(h);
+    return 0;
+  }
+
+  size_t len = (size_t)sz.QuadPart;
+  void* mem = HeapAlloc(GetProcessHeap(), 0, len ? len : 1);
+  if (!mem) {
+    CloseHandle(h);
+    return 0;
+  }
+
+  size_t off = 0;
+  while (off < len) {
+    DWORD chunk = 0;
+    DWORD want = (DWORD)((len - off) > 0x7fffffffu ? 0x7fffffffu : (len - off));
+    if (!ReadFile(h, (uint8_t*)mem + off, want, &chunk, NULL) || chunk == 0) {
+      HeapFree(GetProcessHeap(), 0, mem);
+      CloseHandle(h);
+      return 0;
+    }
+    off += (size_t)chunk;
+  }
+
+  CloseHandle(h);
+  out->data = mem;
+  out->len = len;
+  return 1;
+}
+
+static int rane_os_write_file(const char* path, const void* data, size_t len) {
+  if (!path || (!data && len != 0)) return 0;
+
+  HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (h == INVALID_HANDLE_VALUE) return 0;
+
+  size_t off = 0;
+  while (off < len) {
+    DWORD chunk = 0;
+    DWORD want = (DWORD)((len - off) > 0x7fffffffu ? 0x7fffffffu : (len - off));
+    if (!WriteFile(h, (const uint8_t*)data + off, want, &chunk, NULL)) {
+      CloseHandle(h);
+      return 0;
+    }
+    off += (size_t)chunk;
+  }
+
+  CloseHandle(h);
+  return 1;
+}
+
+static int rane_os_sha256_file(const char* path, uint8_t out32[32]) {
+  if (!path || !out32) return 0;
+
+  BCRYPT_ALG_HANDLE hAlg = NULL;
+  BCRYPT_HASH_HANDLE hHash = NULL;
+  uint8_t* hash_obj = NULL;
+  DWORD hash_obj_len = 0;
+  DWORD cb = 0;
+
+  if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, NULL, 0) != 0) return 0;
+
+  if (BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&hash_obj_len, sizeof(hash_obj_len), &cb, 0) != 0) {
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    return 0;
+  }
+
+  hash_obj = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, hash_obj_len ? hash_obj_len : 1);
+  if (!hash_obj) {
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    return 0;
+  }
+
+  if (BCryptCreateHash(hAlg, &hHash, (PUCHAR)hash_obj, hash_obj_len, NULL, 0, 0) != 0) {
+    HeapFree(GetProcessHeap(), 0, hash_obj);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    return 0;
+  }
+
+  HANDLE f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (f == INVALID_HANDLE_VALUE) {
+    BCryptDestroyHash(hHash);
+    HeapFree(GetProcessHeap(), 0, hash_obj);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    return 0;
+  }
+
+  uint8_t buf[64 * 1024];
+  for (;;) {
+    DWORD rd = 0;
+    if (!ReadFile(f, buf, (DWORD)sizeof(buf), &rd, NULL)) {
+      CloseHandle(f);
+      BCryptDestroyHash(hHash);
+      HeapFree(GetProcessHeap(), 0, hash_obj);
+      BCryptCloseAlgorithmProvider(hAlg, 0);
+      return 0;
+    }
+    if (rd == 0) break;
+    if (BCryptHashData(hHash, (PUCHAR)buf, rd, 0) != 0) {
+      CloseHandle(f);
+      BCryptDestroyHash(hHash);
+      HeapFree(GetProcessHeap(), 0, hash_obj);
+      BCryptCloseAlgorithmProvider(hAlg, 0);
+      return 0;
+    }
+  }
+
+  CloseHandle(f);
+
+  if (BCryptFinishHash(hHash, (PUCHAR)out32, 32, 0) != 0) {
+    BCryptDestroyHash(hHash);
+    HeapFree(GetProcessHeap(), 0, hash_obj);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    return 0;
+  }
+
+  BCryptDestroyHash(hHash);
+  HeapFree(GetProcessHeap(), 0, hash_obj);
+  BCryptCloseAlgorithmProvider(hAlg, 0);
+  return 1;
+}
+
+typedef struct rane_os_proc_result_s {
+  uint32_t exit_code;
+} rane_os_proc_result_t;
+
+static int rane_os_run_process(const char* exe_path, const char* args, rane_os_proc_result_t* out_res) {
+  if (out_res) out_res->exit_code = 0;
+  if (!exe_path) return 0;
+
+  STARTUPINFOA si;
+  PROCESS_INFORMATION pi;
+  memset(&si, 0, sizeof(si));
+  memset(&pi, 0, sizeof(pi));
+  si.cb = sizeof(si);
+
+  // Build command line: "exe_path" + optional args.
+  char cmd[4096];
+  cmd[0] = 0;
+
+  // Quote exe for CreateProcess parsing.
+  if (strchr(exe_path, ' ') || strchr(exe_path, '\t')) {
+    strcpy_s(cmd, sizeof(cmd), "\"");
+    strcat_s(cmd, sizeof(cmd), exe_path);
+    strcat_s(cmd, sizeof(cmd), "\"");
+  } else {
+    strcpy_s(cmd, sizeof(cmd), exe_path);
+  }
+
+  if (args && args[0]) {
+    strcat_s(cmd, sizeof(cmd), " ");
+    strcat_s(cmd, sizeof(cmd), args);
+  }
+
+  BOOL ok = CreateProcessA(
+    NULL,
+    cmd,
+    NULL,
+    NULL,
+    FALSE,
+    0,
+    NULL,
+    NULL,
+    &si,
+    &pi
+  );
+
+  if (!ok) return 0;
+
+  WaitForSingleObject(pi.hProcess, INFINITE);
+
+  DWORD exit_code = 0;
+  GetExitCodeProcess(pi.hProcess, &exit_code);
+
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+
+  if (out_res) out_res->exit_code = (uint32_t)exit_code;
+  return 1;
+}
+
+} // extern "C"
+
+// ---------------------------
+// Existing compiler helpers
+// ---------------------------
 static void rane_dump_ast_minimal(const rane_stmt_t* root) {
   if (!root) {
     printf("AST: <null>\n");
@@ -403,48 +661,102 @@ static rane_error_t rane_compile_file_via_driver(const rane_cli_options_t* cli) 
   return RANE_OK;
 }
 
-static rane_error_t rane_run_exe(const char* exe_path) {
+static void rane_print_os_info() {
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+
+  MEMORYSTATUSEX ms;
+  memset(&ms, 0, sizeof(ms));
+  ms.dwLength = sizeof(ms);
+  GlobalMemoryStatusEx(&ms);
+
+  printf("OS: Windows\n");
+  printf("CPU: processors=%lu page_size=%lu alloc_granularity=%lu\n",
+         (unsigned long)si.dwNumberOfProcessors,
+         (unsigned long)si.dwPageSize,
+         (unsigned long)si.dwAllocationGranularity);
+
+  printf("MEM: phys=%lluMB avail_phys=%lluMB commit_limit=%lluMB commit_avail=%lluMB\n",
+         (unsigned long long)(ms.ullTotalPhys / (1024ull * 1024ull)),
+         (unsigned long long)(ms.ullAvailPhys / (1024ull * 1024ull)),
+         (unsigned long long)(ms.ullTotalPageFile / (1024ull * 1024ull)),
+         (unsigned long long)(ms.ullAvailPageFile / (1024ull * 1024ull)));
+}
+
+static rane_error_t rane_print_cwd() {
+  char buf[MAX_PATH];
+  DWORD n = GetCurrentDirectoryA((DWORD)sizeof(buf), buf);
+  if (n == 0 || n >= (DWORD)sizeof(buf)) return RANE_E_OS_API_FAIL;
+  printf("%s\n", buf);
+  return RANE_OK;
+}
+
+static rane_error_t rane_print_env(const char* name) {
+  if (!name) return RANE_E_INVALID_ARG;
+  char buf[32768];
+  DWORD n = GetEnvironmentVariableA(name, buf, (DWORD)sizeof(buf));
+  if (n == 0) return RANE_E_OS_API_FAIL;
+  if (n >= (DWORD)sizeof(buf)) return RANE_E_OS_API_FAIL;
+  printf("%s\n", buf);
+  return RANE_OK;
+}
+
+static rane_error_t rane_cat_file(const char* path) {
+  if (!path) return RANE_E_INVALID_ARG;
+
+  HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (h == INVALID_HANDLE_VALUE) return RANE_E_OS_API_FAIL;
+
+  HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (out == INVALID_HANDLE_VALUE) {
+    CloseHandle(h);
+    return RANE_E_OS_API_FAIL;
+  }
+
+  uint8_t buf[64 * 1024];
+  for (;;) {
+    DWORD rd = 0;
+    if (!ReadFile(h, buf, (DWORD)sizeof(buf), &rd, NULL)) {
+      CloseHandle(h);
+      return RANE_E_OS_API_FAIL;
+    }
+    if (rd == 0) break;
+
+    DWORD wr = 0;
+    if (!WriteFile(out, buf, rd, &wr, NULL) || wr != rd) {
+      CloseHandle(h);
+      return RANE_E_OS_API_FAIL;
+    }
+  }
+
+  CloseHandle(h);
+  return RANE_OK;
+}
+
+static rane_error_t rane_sha256_file_cmd(const char* path) {
+  uint8_t h[32];
+  if (!rane_os_sha256_file(path, h)) {
+    fprintf(stderr, "rane: sha256 failed for %s\n", path ? path : "<null>");
+    return RANE_E_OS_API_FAIL;
+  }
+
+  for (int i = 0; i < 32; i++) printf("%02x", (unsigned)h[i]);
+  printf("  %s\n", path);
+  return RANE_OK;
+}
+
+static rane_error_t rane_run_exe(const char* exe_path, const char* args) {
   if (!exe_path) return RANE_E_INVALID_ARG;
 
-  STARTUPINFOA si;
-  PROCESS_INFORMATION pi;
-  memset(&si, 0, sizeof(si));
-  memset(&pi, 0, sizeof(pi));
-  si.cb = sizeof(si);
-
-  // CreateProcess requires a mutable command line buffer.
-  char cmd[1024];
-  strncpy_s(cmd, sizeof(cmd), exe_path, _TRUNCATE);
-
-  BOOL ok = CreateProcessA(
-    NULL,
-    cmd,
-    NULL,
-    NULL,
-    FALSE,
-    0,
-    NULL,
-    NULL,
-    &si,
-    &pi
-  );
-
-  if (!ok) {
+  rane_os_proc_result_t r = {};
+  if (!rane_os_run_process(exe_path, args, &r)) {
     DWORD gle = GetLastError();
     fprintf(stderr, "rane: failed to run %s (GetLastError=%lu)\n", exe_path, (unsigned long)gle);
     return RANE_E_OS_API_FAIL;
   }
 
-  WaitForSingleObject(pi.hProcess, INFINITE);
-
-  DWORD exit_code = 0;
-  GetExitCodeProcess(pi.hProcess, &exit_code);
-
-  CloseHandle(pi.hThread);
-  CloseHandle(pi.hProcess);
-
-  printf("rane: program exit code %lu\n", (unsigned long)exit_code);
-  return (exit_code == 0) ? RANE_OK : RANE_E_UNKNOWN;
+  printf("rane: program exit code %lu\n", (unsigned long)r.exit_code);
+  return (r.exit_code == 0) ? RANE_OK : RANE_E_UNKNOWN;
 }
 
 int main(int argc, char** argv) {
@@ -456,6 +768,27 @@ int main(int argc, char** argv) {
 
   if (cli.show_version) { rane_print_version(); return 0; }
   if (cli.show_help) { rane_print_help(); return 0; }
+
+  if (cli.os_info) {
+    rane_print_os_info();
+    return 0;
+  }
+
+  if (cli.print_cwd) {
+    return (rane_print_cwd() == RANE_OK) ? 0 : 1;
+  }
+
+  if (cli.env_name) {
+    return (rane_print_env(cli.env_name) == RANE_OK) ? 0 : 1;
+  }
+
+  if (cli.cat_path) {
+    return (rane_cat_file(cli.cat_path) == RANE_OK) ? 0 : 1;
+  }
+
+  if (cli.sha256_path) {
+    return (rane_sha256_file_cmd(cli.sha256_path) == RANE_OK) ? 0 : 1;
+  }
 
   if (cli.run_selftest) {
     rane_gc_run_selftest();
@@ -503,7 +836,7 @@ int main(int argc, char** argv) {
 
   // --run: run an existing executable path directly.
   if (cli.run_after && !cli.emit_and_run) {
-    rane_error_t err = rane_run_exe(cli.input_path);
+    rane_error_t err = rane_run_exe(cli.input_path, cli.run_args);
     return (err == RANE_OK) ? 0 : 1;
   }
 
@@ -561,7 +894,7 @@ int main(int argc, char** argv) {
       return 1;
     }
     const char* out = cli.output_path ? cli.output_path : "a.exe";
-    err = rane_run_exe(out);
+    err = rane_run_exe(out, cli.run_args);
     return (err == RANE_OK) ? 0 : 1;
   }
 
