@@ -1,5 +1,3 @@
----
-
 # 🌐 **THE RANE LANGUAGE — COMPLETE SYSTEM OVERVIEW (All Updates Considered)**  
 *A deterministic, capability‑aware, parallel systems language for explicit, analyzable, low‑level programming.*
 
