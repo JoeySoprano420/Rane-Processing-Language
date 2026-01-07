@@ -100,95 +100,106 @@ int rane_memcmp(const void* s1, const void* s2, size_t n) {
 }
 
 // -----------------------------------------------------------------------------
-// Containers: rane_vector_t
+// Containers: rane_vector_t (stable ABI: data/size/capacity)
 // -----------------------------------------------------------------------------
-// NOTE: Header only exposes `data` and `size`, so we store capacity in-band as a
-// trailing hidden word allocated alongside the data block.
-//
-// Layout:
-//   [elem0][elem1]...[elemN-1][capacity(size_t)]
-// and `v->data` points to elem0.
-//
-// This keeps ABI stable with the current header while enabling amortized growth.
 
-static size_t* rane_vec_cap_slot(void* data, size_t size) {
-  if (!data) return NULL;
-  return (size_t*)((uint8_t*)data + size * sizeof(void*));
-}
-
-static size_t rane_vec_get_cap(const rane_vector_t* v) {
-  if (!v || !v->data) return 0;
-  size_t* cap = rane_vec_cap_slot(v->data, v->size);
-  return cap ? *cap : 0;
-}
-
-static void rane_vec_set_cap(rane_vector_t* v, size_t cap) {
-  if (!v || !v->data) return;
-  size_t* slot = rane_vec_cap_slot(v->data, v->size);
-  if (slot) *slot = cap;
+static size_t rane_vec_grow_to(size_t cur, size_t need) {
+  size_t cap = cur ? cur : 8u;
+  while (cap < need) {
+    size_t next = cap + (cap >> 1) + 1u; // ~1.5x growth
+    if (next < cap) return need;         // overflow fallback
+    cap = next;
+  }
+  return cap;
 }
 
 void rane_vector_init(rane_vector_t* v) {
   if (!v) return;
   v->data = NULL;
   v->size = 0;
+  v->capacity = 0;
 }
 
-static int rane_vector_reserve(rane_vector_t* v, size_t new_cap) {
-  if (!v) return 0;
-  if (new_cap == 0) new_cap = 1;
+void rane_vector_free(rane_vector_t* v) {
+  if (!v) return;
+  free(v->data);
+  v->data = NULL;
+  v->size = 0;
+  v->capacity = 0;
+}
 
-  size_t old_size = v->size;
-  size_t old_cap = rane_vec_get_cap(v);
+void rane_vector_clear(rane_vector_t* v) {
+  if (!v) return;
+  v->size = 0;
+}
 
-  if (old_cap >= new_cap) return 1;
+void rane_vector_reserve(rane_vector_t* v, size_t capacity) {
+  if (!v) return;
+  if (capacity <= v->capacity) return;
 
-  // Compute new capacity (growth)
-  size_t cap = old_cap ? old_cap : 8;
-  while (cap < new_cap) cap = cap + (cap >> 1) + 1; // ~1.5x growth
+  size_t new_cap = rane_vec_grow_to(v->capacity, capacity);
+  void** nd = (void**)realloc(v->data, new_cap * sizeof(void*));
+  if (!nd) return;
 
-  // Allocate a new block: cap pointers + trailing size_t cap slot
-  size_t bytes = cap * sizeof(void*) + sizeof(size_t);
-  void** new_data = (void**)calloc(1, bytes);
-  if (!new_data) return 0;
-
-  // Copy old pointers
-  if (v->data && old_size) {
-    memcpy(new_data, v->data, old_size * sizeof(void*));
-  }
-
-  // Store capacity at end of new block (after cap elems)
-  *(size_t*)((uint8_t*)new_data + cap * sizeof(void*)) = cap;
-
-  // Free old block: old block allocation size was old_cap pointers + trailing size_t cap slot
-  if (v->data) {
-    void** old_data = (void**)v->data;
-    free(old_data);
-  }
-
-  v->data = new_data;
-  // NOTE: v->size unchanged.
-  return 1;
+  v->data = nd;
+  v->capacity = new_cap;
 }
 
 void rane_vector_push(rane_vector_t* v, void* item) {
   if (!v) return;
+  if (v->size == v->capacity) {
+    rane_vector_reserve(v, v->size + 1);
+    if (v->size == v->capacity) return; // OOM
+  }
+  v->data[v->size++] = item;
+}
 
-  size_t cap = rane_vec_get_cap(v);
-  if (v->data == NULL || cap == 0) {
-    if (!rane_vector_reserve(v, 8)) return;
-    cap = rane_vec_get_cap(v);
-    (void)cap;
+void* rane_vector_pop(rane_vector_t* v) {
+  if (!v || v->size == 0) return NULL;
+  void* out = v->data[v->size - 1];
+  v->size--;
+  return out;
+}
+
+void* rane_vector_get(const rane_vector_t* v, size_t index) {
+  if (!v || !v->data) return NULL;
+  if (index >= v->size) return NULL;
+  return v->data[index];
+}
+
+void rane_vector_set(rane_vector_t* v, size_t index, void* item) {
+  if (!v || !v->data) return;
+  if (index >= v->size) return;
+  v->data[index] = item;
+}
+
+void rane_vector_insert(rane_vector_t* v, size_t index, void* item) {
+  if (!v) return;
+  if (index > v->size) index = v->size;
+
+  if (v->size == v->capacity) {
+    rane_vector_reserve(v, v->size + 1);
+    if (v->size == v->capacity) return; // OOM
   }
 
-  if (v->size >= cap) {
-    if (!rane_vector_reserve(v, v->size + 1)) return;
+  if (index < v->size) {
+    memmove(&v->data[index + 1], &v->data[index], (v->size - index) * sizeof(void*));
   }
 
-  ((void**)v->data)[v->size++] = item;
+  v->data[index] = item;
+  v->size++;
+}
 
-  // Capacity is stored in the allocation, but the slot location depends on `cap`.
-  // We stored it at [cap], so nothing to update here.
+void* rane_vector_remove_at(rane_vector_t* v, size_t index) {
+  if (!v || !v->data) return NULL;
+  if (index >= v->size) return NULL;
+
+  void* out = v->data[index];
+  if (index + 1 < v->size) {
+    memmove(&v->data[index], &v->data[index + 1], (v->size - index - 1) * sizeof(void*));
+  }
+  v->size--;
+  return out;
 }
 
 // -----------------------------------------------------------------------------
@@ -205,7 +216,6 @@ static int rane_cmp_double_qsort(const void* a, const void* b) {
   const double da = *(const double*)a;
   const double db = *(const double*)b;
 
-  // Ensure deterministic ordering for NaNs: place NaNs at the end.
   const int a_nan = (da != da);
   const int b_nan = (db != db);
   if (a_nan && b_nan) return 0;
@@ -343,7 +353,6 @@ void rane_dijkstra(rane_graph_t* g, uint64_t start, uint64_t* dist, uint64_t* pr
     prev[i] = UINT64_MAX;
   }
 
-  // Find start index by id.
   uint64_t start_idx = UINT64_MAX;
   for (size_t i = 0; i < g->node_count; i++) {
     if (g->nodes[i] && g->nodes[i]->id == start) {
@@ -363,21 +372,19 @@ void rane_dijkstra(rane_graph_t* g, uint64_t start, uint64_t* dist, uint64_t* pr
     rane_dijk_heap_item_t it;
     if (!dijk_heap_pop_min(&heap, &it)) break;
 
-    // Stale entry check
     if (it.dist != dist[it.node_index]) continue;
 
     rane_graph_node_t* n = g->nodes[it.node_index];
     for (rane_graph_edge_t* e = n ? n->edges : NULL; e; e = e->next) {
       if (!e->to) continue;
 
-      // Find target index by pointer equality (O(n) but ok for bootstrap stdlib).
       uint64_t to_idx = UINT64_MAX;
       for (size_t j = 0; j < g->node_count; j++) {
         if (g->nodes[j] == e->to) { to_idx = (uint64_t)j; break; }
       }
       if (to_idx == UINT64_MAX) continue;
 
-      if (e->weight < 0) continue; // Dijkstra requires non-negative weights
+      if (e->weight < 0) continue;
 
       uint64_t w = (uint64_t)e->weight;
       uint64_t nd = (dist[it.node_index] == UINT64_MAX) ? UINT64_MAX : (dist[it.node_index] + w);
