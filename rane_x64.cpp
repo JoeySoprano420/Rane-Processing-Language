@@ -278,16 +278,6 @@ void rane_x64_emit_div_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t s
   rane_x64_emit_bytes(e, &modrm_val, 1);
 }
 
-void rane_x64_emit_cmp_reg_imm(rane_x64_emitter_t* e, uint8_t reg, uint64_t imm) {
-  uint8_t rex = rex_w_r(reg);
-  uint8_t opcode = 0x81;
-  uint8_t modrm_val = modrm_byte(0x3, 0x7, reg_code(reg));
-  rane_x64_emit_bytes(e, &rex, 1);
-  rane_x64_emit_bytes(e, &opcode, 1);
-  rane_x64_emit_bytes(e, &modrm_val, 1);
-  rane_x64_emit_bytes(e, (uint8_t*)&imm, 4);
-}
-
 // New: NEG r64 (REX.W + F7 /3)
 void rane_x64_emit_neg_reg(rane_x64_emitter_t* e, uint8_t reg) {
   uint8_t rex = rex_w_r(reg);
@@ -1198,5 +1188,152 @@ void rane_x64_emit_lea_reg_rip_rel32(rane_x64_emitter_t* e, uint8_t reg, int32_t
   rane_x64_emit_bytes(e, &op, 1);
   rane_x64_emit_bytes(e, &modrm, 1);
   rane_x64_emit_bytes(e, (uint8_t*)&rel32, 4);
+}
+
+// New: add/sub/and/or/xor/cmp r/m64, imm32 using 81 /digit id
+static void rane_x64_emit_alu_reg_imm32(rane_x64_emitter_t* e, uint8_t subop, uint8_t reg, uint32_t imm) {
+  uint8_t rex = rex_w_r(reg);
+  uint8_t op = 0x81;
+  uint8_t modrm = modrm_byte(0x3, subop, reg_code(reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&imm, 4);
+}
+
+void rane_x64_emit_add_reg_imm32(rane_x64_emitter_t* e, uint8_t dst_reg, uint32_t imm) {
+  rane_x64_emit_alu_reg_imm32(e, 0x0, dst_reg, imm);
+}
+
+void rane_x64_emit_sub_reg_imm32(rane_x64_emitter_t* e, uint8_t dst_reg, uint32_t imm) {
+  rane_x64_emit_alu_reg_imm32(e, 0x5, dst_reg, imm);
+}
+
+void rane_x64_emit_and_reg_imm32(rane_x64_emitter_t* e, uint8_t dst_reg, uint32_t imm) {
+  rane_x64_emit_alu_reg_imm32(e, 0x4, dst_reg, imm);
+}
+
+void rane_x64_emit_or_reg_imm32(rane_x64_emitter_t* e, uint8_t dst_reg, uint32_t imm) {
+  rane_x64_emit_alu_reg_imm32(e, 0x1, dst_reg, imm);
+}
+
+void rane_x64_emit_xor_reg_imm32(rane_x64_emitter_t* e, uint8_t dst_reg, uint32_t imm) {
+  rane_x64_emit_alu_reg_imm32(e, 0x6, dst_reg, imm);
+}
+
+void rane_x64_emit_cmp_reg_imm32(rane_x64_emitter_t* e, uint8_t reg, uint32_t imm) {
+  rane_x64_emit_alu_reg_imm32(e, 0x7, reg, imm);
+}
+
+// New: unsigned rel32 jumps (0F 87..86..82..86 variants)
+void rane_x64_emit_ja_rel32(rane_x64_emitter_t* e, int32_t rel) {
+  uint8_t op1 = 0x0F, op2 = 0x87;
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&rel, 4);
+}
+
+void rane_x64_emit_jae_rel32(rane_x64_emitter_t* e, int32_t rel) {
+  uint8_t op1 = 0x0F, op2 = 0x83;
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&rel, 4);
+}
+
+void rane_x64_emit_jb_rel32(rane_x64_emitter_t* e, int32_t rel) {
+  uint8_t op1 = 0x0F, op2 = 0x82;
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&rel, 4);
+}
+
+void rane_x64_emit_jbe_rel32(rane_x64_emitter_t* e, int32_t rel) {
+  uint8_t op1 = 0x0F, op2 = 0x86;
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&rel, 4);
+}
+
+// New: IMUL r64, r/m64 (REX.W + 0F AF /r)
+void rane_x64_emit_imul_reg_reg(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t rex = rex_w_rm(dst_reg, src_reg); // reg=dst, rm=src
+  uint8_t op1 = 0x0F;
+  uint8_t op2 = 0xAF;
+  uint8_t modrm = modrm_byte(0x3, reg_code(dst_reg), reg_code(src_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// New: MOVZX/MOVSX register-to-register helpers
+// movzx r64, r/m8  => REX.W + 0F B6 /r
+void rane_x64_emit_movzx_r64_r8(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t rex = rex_w_rm(dst_reg, src_reg);
+  uint8_t op1 = 0x0F;
+  uint8_t op2 = 0xB6;
+  uint8_t modrm = modrm_byte(0x3, reg_code(dst_reg), reg_code(src_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// movzx r64, r/m16 => REX.W + 0F B7 /r
+void rane_x64_emit_movzx_r64_r16(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t rex = rex_w_rm(dst_reg, src_reg);
+  uint8_t op1 = 0x0F;
+  uint8_t op2 = 0xB7;
+  uint8_t modrm = modrm_byte(0x3, reg_code(dst_reg), reg_code(src_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// mov r32, r/m32 (zero-extends into r64): 8B /r (no REX.W)
+void rane_x64_emit_movzx_r64_r32(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  // Encode as MOV r32, r/m32; this zero-extends into 64-bit reg.
+  // Need REX to access r8d+ / r8+r/m when >=8.
+  uint8_t rex = (uint8_t)(0x40 | (((dst_reg >> 3) & 0x1) << 2) | ((src_reg >> 3) & 0x1));
+  uint8_t op = 0x8B;
+  uint8_t modrm = modrm_byte(0x3, reg_code(dst_reg), reg_code(src_reg));
+  if (rex != 0x40) rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// movsx r64, r/m8  => REX.W + 0F BE /r
+void rane_x64_emit_movsx_r64_r8(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t rex = rex_w_rm(dst_reg, src_reg);
+  uint8_t op1 = 0x0F;
+  uint8_t op2 = 0xBE;
+  uint8_t modrm = modrm_byte(0x3, reg_code(dst_reg), reg_code(src_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// movsx r64, r/m16 => REX.W + 0F BF /r
+void rane_x64_emit_movsx_r64_r16(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t rex = rex_w_rm(dst_reg, src_reg);
+  uint8_t op1 = 0x0F;
+  uint8_t op2 = 0xBF;
+  uint8_t modrm = modrm_byte(0x3, reg_code(dst_reg), reg_code(src_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// movsxd r64, r/m32 => REX.W + 63 /r
+void rane_x64_emit_movsx_r64_r32(rane_x64_emitter_t* e, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t rex = rex_w_rm(dst_reg, src_reg);
+  uint8_t op = 0x63;
+  uint8_t modrm = modrm_byte(0x3, reg_code(dst_reg), reg_code(src_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
 }
 
