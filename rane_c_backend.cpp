@@ -92,6 +92,58 @@ static void c_escape_c_string(const char* in, char* out, size_t out_cap) {
   out[w] = 0;
 }
 
+static const char* c_cc_to_cmpop(rane_tir_cc_t cc) {
+  switch (cc) {
+    case TIR_CC_E:  return "==";
+    case TIR_CC_NE: return "!=";
+    case TIR_CC_L:  return "<";
+    case TIR_CC_LE: return "<=";
+    case TIR_CC_G:  return ">";
+    case TIR_CC_GE: return ">=";
+    default: return "==";
+  }
+}
+
+static rane_error_t c_emit_mem_expr(char* out, size_t out_cap, const rane_tir_operand_t* m) {
+  if (!out || out_cap == 0) return RANE_E_INVALID_ARG;
+  out[0] = 0;
+  if (!m || m->kind != TIR_OPERAND_M) return RANE_E_INVALID_ARG;
+
+  // Address calc:
+  //   (uint8_t*)r[base] + (uint8_t*)r[index] * scale + disp
+  // NOTE: This matches bootstrap semantics; types are not enforced here.
+#if defined(_WIN32)
+  if (m->m.index_r != 0) {
+    sprintf_s(
+      out, out_cap,
+      "((uint8_t*)(uintptr_t)r[%u] + (size_t)((uint8_t*)(uintptr_t)r[%u] - (uint8_t*)0) * %u + (ptrdiff_t)%d)",
+      (unsigned)m->m.base_r, (unsigned)m->m.index_r, (unsigned)m->m.scale, (int)m->m.disp
+    );
+  } else {
+    sprintf_s(
+      out, out_cap,
+      "((uint8_t*)(uintptr_t)r[%u] + (ptrdiff_t)%d)",
+      (unsigned)m->m.base_r, (int)m->m.disp
+    );
+  }
+#else
+  if (m->m.index_r != 0) {
+    snprintf(
+      out, out_cap,
+      "((uint8_t*)(uintptr_t)r[%u] + (size_t)((uint8_t*)(uintptr_t)r[%u] - (uint8_t*)0) * %u + (ptrdiff_t)%d)",
+      (unsigned)m->m.base_r, (unsigned)m->m.index_r, (unsigned)m->m.scale, (int)m->m.disp
+    );
+  } else {
+    snprintf(
+      out, out_cap,
+      "((uint8_t*)(uintptr_t)r[%u] + (ptrdiff_t)%d)",
+      (unsigned)m->m.base_r, (int)m->m.disp
+    );
+  }
+#endif
+  return RANE_OK;
+}
+
 static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, const rane_tir_function_t* f) {
   if (!out || !out_len || !out_cap || !f) return RANE_E_INVALID_ARG;
 
@@ -104,6 +156,12 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
   c_append(out, out_len, out_cap, "  uint64_t call_arg_bytes = 0;\n");
   c_append(out, out_len, out_cap, "  uint64_t* call_stack = NULL;\n");
   c_append(out, out_len, out_cap, "  size_t call_stack_words = 0;\n");
+
+  // Minimal flag model for TEST/CMP + JCC_EXT/SETCC/CMOVCC.
+  // This stays consistent with the x64 backend which relies on flags.
+  c_append(out, out_len, out_cap, "  uint8_t __rane_flags_valid = 0;\n");
+  c_append(out, out_len, out_cap, "  int64_t __rane_flags_lhs = 0;\n");
+  c_append(out, out_len, out_cap, "  int64_t __rane_flags_rhs = 0;\n");
 
   for (uint32_t pc = 0; pc < f->inst_count; pc++) {
     const rane_tir_inst_t* in = &f->insts[pc];
@@ -135,11 +193,10 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
             c_appendf(out, out_len, out_cap, "  r[%u] = r[%u];\n", (unsigned)dst, (unsigned)src);
           } else if (in->operands[1].kind == TIR_OPERAND_IMM) {
             if (in->type == RANE_TYPE_P64) {
-              // Heuristic: treat imm as pointer to string literal created by parser.
-              const char* s = (const char*)(uintptr_t)in->operands[1].imm;
-              if (s && s[0]) {
+              const char* s0 = (const char*)(uintptr_t)in->operands[1].imm;
+              if (s0 && s0[0]) {
                 char esc[2048];
-                c_escape_c_string(s, esc, sizeof(esc));
+                c_escape_c_string(s0, esc, sizeof(esc));
                 c_appendf(out, out_len, out_cap, "  r[%u] = (uint64_t)(uintptr_t)\"%s\";\n", (unsigned)dst, esc);
               } else {
                 c_appendf(out, out_len, out_cap, "  r[%u] = 0;\n", (unsigned)dst);
@@ -149,6 +206,72 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
             }
           }
         }
+        break;
+      }
+
+      case TIR_NEG: {
+        if (in->operand_count != 1 || in->operands[0].kind != TIR_OPERAND_R) break;
+        uint32_t dst = in->operands[0].r;
+        c_appendf(out, out_len, out_cap, "  r[%u] = (uint64_t)(-(int64_t)r[%u]);\n", (unsigned)dst, (unsigned)dst);
+        break;
+      }
+
+      case TIR_NOT: {
+        if (in->operand_count != 1 || in->operands[0].kind != TIR_OPERAND_R) break;
+        uint32_t dst = in->operands[0].r;
+        c_appendf(out, out_len, out_cap, "  r[%u] = ~r[%u];\n", (unsigned)dst, (unsigned)dst);
+        break;
+      }
+
+      case TIR_TEST: {
+        // Record flags-lhs/flags-rhs for following JCC_EXT/SETCC/CMOVCC.
+        if (in->operand_count != 2 || in->operands[0].kind != TIR_OPERAND_R) break;
+        uint32_t lhs = in->operands[0].r;
+
+        if (in->operands[1].kind == TIR_OPERAND_R) {
+          uint32_t rhs = in->operands[1].r;
+          c_appendf(out, out_len, out_cap, "  __rane_flags_lhs = (int64_t)(r[%u] & r[%u]);\n", (unsigned)lhs, (unsigned)rhs);
+          c_append(out, out_len, out_cap, "  __rane_flags_rhs = 0;\n");
+          c_append(out, out_len, out_cap, "  __rane_flags_valid = 1;\n");
+        } else if (in->operands[1].kind == TIR_OPERAND_IMM) {
+          unsigned long long imm = (unsigned long long)in->operands[1].imm;
+          c_appendf(out, out_len, out_cap, "  __rane_flags_lhs = (int64_t)(r[%u] & (uint64_t)%lluull);\n", (unsigned)lhs, imm);
+          c_append(out, out_len, out_cap, "  __rane_flags_rhs = 0;\n");
+          c_append(out, out_len, out_cap, "  __rane_flags_valid = 1;\n");
+        }
+        break;
+      }
+
+      case TIR_SETCC: {
+        // Convention matches the x64 backend patch:
+        //  dst = operands[0] (R), cc = operands[1] (IMM)
+        if (in->operand_count != 2) return RANE_E_INVALID_ARG;
+        if (in->operands[0].kind != TIR_OPERAND_R) return RANE_E_INVALID_ARG;
+        if (in->operands[1].kind != TIR_OPERAND_IMM) return RANE_E_INVALID_ARG;
+        uint32_t dst = in->operands[0].r;
+        rane_tir_cc_t cc = (rane_tir_cc_t)in->operands[1].imm;
+        const char* cmpop = c_cc_to_cmpop(cc);
+
+        c_append(out, out_len, out_cap, "  if (!__rane_flags_valid) return (uint64_t)0;\n");
+        c_appendf(out, out_len, out_cap, "  r[%u] = ((int64_t)__rane_flags_lhs %s (int64_t)__rane_flags_rhs) ? 1ull : 0ull;\n", (unsigned)dst, cmpop);
+        break;
+      }
+
+      case TIR_CMOVCC: {
+        // Convention matches the x64 backend patch:
+        //  dst = operands[0] (R), src = operands[1] (R), cc = operands[2] (IMM)
+        if (in->operand_count != 3) return RANE_E_INVALID_ARG;
+        if (in->operands[0].kind != TIR_OPERAND_R) return RANE_E_INVALID_ARG;
+        if (in->operands[1].kind != TIR_OPERAND_R) return RANE_E_INVALID_ARG;
+        if (in->operands[2].kind != TIR_OPERAND_IMM) return RANE_E_INVALID_ARG;
+
+        uint32_t dst = in->operands[0].r;
+        uint32_t src = in->operands[1].r;
+        rane_tir_cc_t cc = (rane_tir_cc_t)in->operands[2].imm;
+        const char* cmpop = c_cc_to_cmpop(cc);
+
+        c_append(out, out_len, out_cap, "  if (!__rane_flags_valid) return (uint64_t)0;\n");
+        c_appendf(out, out_len, out_cap, "  if ((int64_t)__rane_flags_lhs %s (int64_t)__rane_flags_rhs) r[%u] = r[%u];\n", cmpop, (unsigned)dst, (unsigned)src);
         break;
       }
 
@@ -180,6 +303,32 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
         break;
       }
 
+      case TIR_LEA: {
+        if (in->operand_count != 2) return RANE_E_INVALID_ARG;
+        if (in->operands[0].kind != TIR_OPERAND_R) return RANE_E_INVALID_ARG;
+        if (in->operands[1].kind != TIR_OPERAND_M) return RANE_E_INVALID_ARG;
+
+        uint32_t dst = in->operands[0].r;
+        char addr_expr[256];
+        if (c_emit_mem_expr(addr_expr, sizeof(addr_expr), &in->operands[1]) != RANE_OK) return RANE_E_INVALID_ARG;
+        c_appendf(out, out_len, out_cap, "  r[%u] = (uint64_t)(uintptr_t)%s;\n", (unsigned)dst, addr_expr);
+        break;
+      }
+
+      case TIR_STV: {
+        // STV [mem], rS  (bootstrap writes 64-bit)
+        if (in->operand_count != 2) return RANE_E_INVALID_ARG;
+        if (in->operands[0].kind != TIR_OPERAND_M) return RANE_E_INVALID_ARG;
+        if (in->operands[1].kind != TIR_OPERAND_R) return RANE_E_INVALID_ARG;
+
+        uint32_t src = in->operands[1].r;
+        char addr_expr[256];
+        if (c_emit_mem_expr(addr_expr, sizeof(addr_expr), &in->operands[0]) != RANE_OK) return RANE_E_INVALID_ARG;
+
+        c_appendf(out, out_len, out_cap, "  *(uint64_t*)(void*)%s = (uint64_t)r[%u];\n", addr_expr, (unsigned)src);
+        break;
+      }
+
       case TIR_ADD:
       case TIR_SUB:
       case TIR_MUL:
@@ -194,7 +343,6 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
         if (in->operands[0].kind != TIR_OPERAND_R) break;
         uint32_t dst = in->operands[0].r;
 
-        // For now only support RHS reg/imm.
         if (in->operands[1].kind == TIR_OPERAND_R) {
           uint32_t rhs = in->operands[1].r;
           const char* op = NULL;
@@ -246,11 +394,25 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
         break;
       }
 
-      case TIR_CMP:
-        // Flags are implicit in x64; for C backend we handle only the common lowering pattern,
-        // where CMP is immediately followed by JCC_EXT.
-        // We'll ignore CMP here and let JCC_EXT re-evaluate as needed.
+      case TIR_CMP: {
+        // Preserve existing behavior for JCC_EXT, but also record flags for SETCC/CMOVCC.
+        if (in->operand_count != 2) break;
+        if (in->operands[0].kind != TIR_OPERAND_R) break;
+
+        uint32_t lhs = in->operands[0].r;
+        if (in->operands[1].kind == TIR_OPERAND_R) {
+          uint32_t rhs = in->operands[1].r;
+          c_appendf(out, out_len, out_cap, "  __rane_flags_lhs = (int64_t)r[%u];\n", (unsigned)lhs);
+          c_appendf(out, out_len, out_cap, "  __rane_flags_rhs = (int64_t)r[%u];\n", (unsigned)rhs);
+          c_append(out, out_len, out_cap, "  __rane_flags_valid = 1;\n");
+        } else if (in->operands[1].kind == TIR_OPERAND_IMM) {
+          unsigned long long imm = (unsigned long long)in->operands[1].imm;
+          c_appendf(out, out_len, out_cap, "  __rane_flags_lhs = (int64_t)r[%u];\n", (unsigned)lhs);
+          c_appendf(out, out_len, out_cap, "  __rane_flags_rhs = (int64_t)(uint64_t)%lluull;\n", imm);
+          c_append(out, out_len, out_cap, "  __rane_flags_valid = 1;\n");
+        }
         break;
+      }
 
       case TIR_JMP: {
         if (in->operand_count != 1 || in->operands[0].kind != TIR_OPERAND_LBL) break;
@@ -259,7 +421,6 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
       }
 
       case TIR_JCC_EXT: {
-        // Very small: assume previous inst is CMP rX, imm or CMP rX, rY.
         if (in->operand_count != 2) break;
         if (in->operands[0].kind != TIR_OPERAND_IMM) break;
         if (in->operands[1].kind != TIR_OPERAND_LBL) break;
@@ -274,7 +435,6 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
         const char* label = in->operands[1].lbl;
         rane_tir_cc_t cc = (rane_tir_cc_t)in->operands[0].imm;
 
-        // rhs can be reg or imm.
         char rhs_expr[64];
         rhs_expr[0] = 0;
         if (prev->operands[1].kind == TIR_OPERAND_R) {
@@ -293,17 +453,7 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
           return RANE_E_INVALID_ARG;
         }
 
-        const char* cmpop = "==";
-        switch (cc) {
-          case TIR_CC_E:  cmpop = "=="; break;
-          case TIR_CC_NE: cmpop = "!="; break;
-          case TIR_CC_L:  cmpop = "<"; break;
-          case TIR_CC_LE: cmpop = "<="; break;
-          case TIR_CC_G:  cmpop = ">"; break;
-          case TIR_CC_GE: cmpop = ">="; break;
-          default: cmpop = "=="; break;
-        }
-
+        const char* cmpop = c_cc_to_cmpop(cc);
         c_appendf(out, out_len, out_cap, "  if ((int64_t)r[%u] %s (int64_t)(%s)) goto %s;\n", (unsigned)lhs, cmpop, rhs_expr, label);
         break;
       }
@@ -313,9 +463,6 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
         if (in->operand_count != 1 || in->operands[0].kind != TIR_OPERAND_LBL) return RANE_E_INVALID_ARG;
         const char* target = in->operands[0].lbl;
 
-        // Prepare a shadow area + stack args. We model it with a local struct so we can pass stack args
-        // by value through a function pointer call where needed. For now, only support 0..4 args.
-        // Stack args beyond 4 are not supported in this backend yet.
         c_append(out, out_len, out_cap, "  {\n");
         c_append(out, out_len, out_cap, "    // args in r[1], r[2], r[8], r[9] (Win64)\n");
 
@@ -327,13 +474,8 @@ static rane_error_t emit_function(char** out, size_t* out_len, size_t* out_cap, 
           break;
         }
 
-        // For general calls, only support 0..4 register args. If stack args were requested, reject.
         c_append(out, out_len, out_cap, "    if (call_stack_words != 0) { /* stack args unsupported in C backend for general calls */ return (uint64_t)0; }\n");
-
-        // Emit call based on whether it's local or import (both are plain C symbols here)
         c_appendf(out, out_len, out_cap, "    extern uint64_t %s(void);\n", target);
-        // If there are register args, we need a function pointer cast. We'll infer arg count by checking which regs are non-zero is not safe.
-        // Instead, treat as 0-arg call for now except rane_rt_print.
         c_appendf(out, out_len, out_cap, "    r[0] = %s();\n", target);
         c_append(out, out_len, out_cap, "  }\n");
         break;
