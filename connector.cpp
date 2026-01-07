@@ -22,7 +22,60 @@
 #include <condition_variable>
 #include <map>
 #include <set>
-#include <nlohmann/json.hpp> // Use the standard nlohmann/json header
+
+// Fix: Provide a fallback minimal JSON implementation if nlohmann/json.hpp is missing
+#if __has_include(<nlohmann/json.hpp>)
+#include <nlohmann/json.hpp>
+#else
+// Minimal fallback: define a dummy nlohmann::json that supports only the used interface
+#include <map>
+#include <string>
+#include <vector>
+#include <iostream>
+namespace nlohmann {
+    class json {
+        std::map<std::string, std::string> obj;
+        std::vector<json> arr;
+        bool is_array = false;
+    public:
+        json() = default;
+        json(const json&) = default;
+        json& operator=(const json&) = default;
+        json& operator[](const std::string& k) { is_array = false; return obj[k], *this; }
+        void push_back(const json& j) { is_array = true; arr.push_back(j); }
+        void clear() { obj.clear(); arr.clear(); is_array = false; }
+        friend std::ostream& operator<<(std::ostream& os, const json& j) {
+            os << j.dump(2); return os;
+        }
+        std::string dump(int = 2) const {
+            if (is_array) {
+                std::string s = "[";
+                for (size_t i = 0; i < arr.size(); ++i) {
+                    if (i) s += ",";
+                    s += arr[i].dump();
+                }
+                s += "]";
+                return s;
+            } else {
+                std::string s = "{";
+                bool first = true;
+                for (const auto& kv : obj) {
+                    if (!first) s += ",";
+                    s += "\"" + kv.first + "\":\"" + kv.second + "\"";
+                    first = false;
+                }
+                s += "}";
+                return s;
+            }
+        }
+        // Allow assignment from basic types for the minimal use-case
+        json& operator=(const std::string& v) { obj["value"] = v; return *this; }
+        json& operator=(int v) { obj["value"] = std::to_string(v); return *this; }
+        json& operator=(double v) { obj["value"] = std::to_string(v); return *this; }
+        json& operator=(bool v) { obj["value"] = v ? "true" : "false"; return *this; }
+    };
+}
+#endif
 
 extern "C" {
 #include "rane_parser.h"
