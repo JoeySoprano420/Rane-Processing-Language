@@ -35,6 +35,24 @@
 
 #pragma comment(lib, "bcrypt.lib")
 
+typedef enum rane_cli_exit_e : int {
+  RANE_EXIT_OK = 0,
+  RANE_EXIT_USAGE = 2,
+  RANE_EXIT_TOOL_FAIL = 3,
+  RANE_EXIT_COMPILE_FAIL = 4,
+  RANE_EXIT_INTERNAL = 5,
+} rane_cli_exit_t;
+
+typedef enum rane_selftest_kind_e : uint32_t {
+  RANE_SELFTEST_NONE   = 0,
+  RANE_SELFTEST_ALL    = 1,
+  RANE_SELFTEST_GC     = 2,
+  RANE_SELFTEST_LEXER  = 3,
+  RANE_SELFTEST_PARSER = 4,
+  RANE_SELFTEST_TIR    = 5,
+  RANE_SELFTEST_X64    = 6,
+} rane_selftest_kind_t;
+
 typedef struct rane_cli_options_s {
   const char* input_path;
   const char* output_path;
@@ -42,6 +60,8 @@ typedef struct rane_cli_options_s {
   int emit_c;
 
   int run_selftest;
+  rane_selftest_kind_t selftest_kind;
+
   int run_demo_pipeline;
 
   int dump_ast;
@@ -54,9 +74,15 @@ typedef struct rane_cli_options_s {
   int typecheck_only;
 
   int time_stages;
+  int time_per_function;
 
   int run_after;          // run the produced exe
   int emit_and_run;       // compile then run (exe only)
+
+  int compile_all;
+  const char* compile_all_pattern; // e.g. tests\*.rane
+
+  int structured; // structured results for batch/selftest
 
   // New: OS tooling
   int os_info;
@@ -101,9 +127,14 @@ static void rane_print_help() {
   printf("Compile modes:\n");
   printf("  (default)                Compile to exe (PE x64)\n");
   printf("  -emit-c                  Compile to portable C (out.c)\n");
+  printf("  --compile-all <glob>     Batch compile files (Win32 glob; e.g. tests\\\\*.rane)\n");
   printf("  --run                    Run an existing exe (requires <input.exe>)\n");
   printf("  --run --args \"...\"       Run an existing exe with arguments\n");
   printf("  --emit-and-run           Compile to exe, then run it\n");
+  printf("\n");
+  printf("Selftests:\n");
+  printf("  --selftest all|gc|lexer|parser|tir|x64\n");
+  printf("  --structured             Print structured results (batch/selftest)\n");
   printf("\n");
   printf("OS tools:\n");
   printf("  --os-info                Print OS/CPU/memory info (Win32)\n");
@@ -123,11 +154,13 @@ static void rane_print_help() {
   printf("  --dump-ssa               Run SSA + print a minimal SSA status line\n");
   printf("  --dump-regalloc          Run regalloc + print a minimal regalloc status line\n");
   printf("\n");
+  printf("Timing:\n");
+  printf("  --time                   Print stage timings\n");
+  printf("  --time-fns               Per-function pass timings (SSA/regalloc/opt)\n");
+  printf("\n");
   printf("Other:\n");
   printf("  -o <path>                Output path (defaults: a.exe or out.c when -emit-c)\n");
   printf("  -O0|-O1|-O2|-O3           Optimization level (default: -O2)\n");
-  printf("  --time                   Print stage timings\n");
-  printf("  --run-selftest           Run core subsystem selftests (currently: GC)\n");
   printf("  --demo-pipeline          Run in-process demo pipeline (no file IO)\n");
   printf("  --help                   Show this help\n");
   printf("  --version                Show version\n");
@@ -147,6 +180,17 @@ static int rane_parse_opt_level(const char* s, int* out_level) {
   return 0;
 }
 
+static rane_selftest_kind_t rane_parse_selftest_kind(const char* s) {
+  if (!s) return RANE_SELFTEST_NONE;
+  if (rane_streq(s, "all")) return RANE_SELFTEST_ALL;
+  if (rane_streq(s, "gc")) return RANE_SELFTEST_GC;
+  if (rane_streq(s, "lexer")) return RANE_SELFTEST_LEXER;
+  if (rane_streq(s, "parser")) return RANE_SELFTEST_PARSER;
+  if (rane_streq(s, "tir")) return RANE_SELFTEST_TIR;
+  if (rane_streq(s, "x64")) return RANE_SELFTEST_X64;
+  return RANE_SELFTEST_NONE;
+}
+
 static int rane_cli_parse(int argc, char** argv, rane_cli_options_t* out) {
   if (!out) return 0;
   memset(out, 0, sizeof(*out));
@@ -155,6 +199,7 @@ static int rane_cli_parse(int argc, char** argv, rane_cli_options_t* out) {
   out->emit_c = 0;
   out->output_path = NULL;
   out->input_path = NULL;
+  out->selftest_kind = RANE_SELFTEST_NONE;
 
   for (int i = 1; i < argc; i++) {
     const char* a = argv[i];
@@ -169,9 +214,27 @@ static int rane_cli_parse(int argc, char** argv, rane_cli_options_t* out) {
       return 1;
     }
 
+    if (rane_streq(a, "--structured")) { out->structured = 1; continue; }
+    if (rane_streq(a, "--time-fns")) { out->time_per_function = 1; continue; }
+
     if (rane_streq(a, "-emit-c")) { out->emit_c = 1; continue; }
-    if (rane_streq(a, "--run-selftest")) { out->run_selftest = 1; continue; }
+    if (rane_streq(a, "--run-selftest")) { out->run_selftest = 1; out->selftest_kind = RANE_SELFTEST_GC; continue; }
     if (rane_streq(a, "--demo-pipeline")) { out->run_demo_pipeline = 1; continue; }
+
+    if (rane_streq(a, "--selftest")) {
+      if (i + 1 >= argc) return 0;
+      out->run_selftest = 1;
+      out->selftest_kind = rane_parse_selftest_kind(argv[++i]);
+      if (out->selftest_kind == RANE_SELFTEST_NONE) return 0;
+      continue;
+    }
+
+    if (rane_streq(a, "--compile-all")) {
+      if (i + 1 >= argc) return 0;
+      out->compile_all = 1;
+      out->compile_all_pattern = argv[++i];
+      continue;
+    }
 
     if (rane_streq(a, "--dump-ast")) { out->dump_ast = 1; continue; }
     if (rane_streq(a, "--dump-tir")) { out->dump_tir = 1; continue; }
@@ -261,6 +324,89 @@ static int rane_read_entire_file(const char* path, char** out_buf, size_t* out_l
   buf[rd] = 0;
   *out_buf = buf;
   *out_len = rd;
+  return 1;
+}
+
+static void rane_print_error(const char* stage, rane_error_t err, const char* msg) {
+  if (stage && stage[0]) fprintf(stderr, "rane: %s: ", stage);
+  if (msg && msg[0]) fprintf(stderr, "%s", msg);
+  if (err != RANE_OK) fprintf(stderr, " (%d)", (int)err);
+  fprintf(stderr, "\n");
+}
+
+static void rane_print_error2(const char* stage, const char* path, rane_error_t err, const char* msg) {
+  if (path && path[0]) fprintf(stderr, "rane: %s: %s: ", stage ? stage : "error", path);
+  else fprintf(stderr, "rane: %s: ", stage ? stage : "error");
+  if (msg && msg[0]) fprintf(stderr, "%s", msg);
+  if (err != RANE_OK) fprintf(stderr, " (%d)", (int)err);
+  fprintf(stderr, "\n");
+}
+
+static const char* rane_path_basename(const char* p) {
+  if (!p) return "";
+  const char* s = p;
+  for (const char* it = p; *it; it++) {
+    if (*it == '\\' || *it == '/') s = it + 1;
+  }
+  return s;
+}
+
+static void rane_make_out_path_for_input(const char* input, int emit_c, char* out, size_t out_cap) {
+  if (!out || out_cap == 0) return;
+  out[0] = 0;
+  const char* base = rane_path_basename(input);
+  if (!base || !base[0]) base = "out.rane";
+
+  // Strip extension
+  char stem[MAX_PATH];
+  strncpy_s(stem, sizeof(stem), base, _TRUNCATE);
+  char* dot = strrchr(stem, '.');
+  if (dot) *dot = 0;
+
+  if (emit_c) {
+    sprintf_s(out, out_cap, "%s.c", stem);
+  } else {
+    sprintf_s(out, out_cap, "%s.exe", stem);
+  }
+}
+
+static int rane_glob_files_win32(const char* pattern, char out_paths[][MAX_PATH], uint32_t cap, uint32_t* out_count) {
+  if (out_count) *out_count = 0;
+  if (!pattern || !pattern[0] || !out_paths || cap == 0) return 0;
+
+  WIN32_FIND_DATAA fd;
+  HANDLE h = FindFirstFileA(pattern, &fd);
+  if (h == INVALID_HANDLE_VALUE) return 0;
+
+  // Extract directory prefix from pattern (up to last slash/backslash)
+  char dir[MAX_PATH];
+  dir[0] = 0;
+  const char* last_slash = strrchr(pattern, '\\');
+  const char* last_slash2 = strrchr(pattern, '/');
+  const char* cut = last_slash;
+  if (last_slash2 && (!cut || last_slash2 > cut)) cut = last_slash2;
+  if (cut) {
+    size_t n = (size_t)(cut - pattern + 1);
+    if (n >= sizeof(dir)) n = sizeof(dir) - 1;
+    memcpy(dir, pattern, n);
+    dir[n] = 0;
+  }
+
+  uint32_t n = 0;
+  do {
+    if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+    if (n >= cap) break;
+
+    if (dir[0]) {
+      sprintf_s(out_paths[n], MAX_PATH, "%s%s", dir, fd.cFileName);
+    } else {
+      strncpy_s(out_paths[n], MAX_PATH, fd.cFileName, _TRUNCATE);
+    }
+    n++;
+  } while (FindNextFileA(h, &fd));
+
+  FindClose(h);
+  if (out_count) *out_count = n;
   return 1;
 }
 
@@ -527,7 +673,7 @@ static rane_error_t rane_lex_file(const char* path) {
   char* buf = NULL;
   size_t len = 0;
   if (!rane_read_entire_file(path, &buf, &len)) {
-    fprintf(stderr, "rane: failed to open %s\n", path);
+    rane_print_error2("lex", path, RANE_E_OS_API_FAIL, "failed to open");
     return RANE_E_OS_API_FAIL;
   }
 
@@ -566,69 +712,159 @@ static rane_error_t rane_lex_file(const char* path) {
   return RANE_OK;
 }
 
-static rane_error_t rane_parse_typecheck_lower_for_file(
+static rane_error_t rane_parse_typecheck_lower_for_file_ex(
   const rane_cli_options_t* cli,
+  const char* input_path,
   rane_stmt_t** out_ast,
-  rane_tir_module_t* out_tir
+  rane_tir_module_t* out_tir,
+  double* out_t_parse_ms,
+  double* out_t_tc_ms,
+  double* out_t_lower_ms
 ) {
   if (out_ast) *out_ast = NULL;
   if (out_tir) memset(out_tir, 0, sizeof(*out_tir));
-  if (!cli || !cli->input_path) return RANE_E_INVALID_ARG;
+  if (out_t_parse_ms) *out_t_parse_ms = 0.0;
+  if (out_t_tc_ms) *out_t_tc_ms = 0.0;
+  if (out_t_lower_ms) *out_t_lower_ms = 0.0;
+
+  if (!cli || !input_path) return RANE_E_INVALID_ARG;
 
   char* buf = NULL;
   size_t len = 0;
-  if (!rane_read_entire_file(cli->input_path, &buf, &len)) {
-    fprintf(stderr, "rane: failed to open %s\n", cli->input_path);
+  if (!rane_read_entire_file(input_path, &buf, &len)) {
+    rane_print_error2("io", input_path, RANE_E_OS_API_FAIL, "failed to open");
     return RANE_E_OS_API_FAIL;
   }
 
   rane_timer_t tm;
-  if (cli->time_stages) rane_timer_start(&tm);
+  if (cli->time_stages || cli->time_per_function) rane_timer_start(&tm);
 
   rane_stmt_t* ast = nullptr;
   rane_diag_t diag = {};
   rane_error_t err = rane_parse_source_len_ex(buf, len, &ast, &diag);
   if (err != RANE_OK) {
-    fprintf(stderr, "rane: parse failed (%u:%u): %s\n",
-            (unsigned)diag.span.line, (unsigned)diag.span.col, diag.message);
+    fprintf(stderr, "rane: parse failed: %s (%u:%u)\n",
+            diag.message,
+            (unsigned)diag.span.line,
+            (unsigned)diag.span.col);
     free(buf);
     return err;
   }
 
-  double t_parse = cli->time_stages ? rane_timer_elapsed_ms(&tm) : 0.0;
-  if (cli->time_stages) rane_timer_start(&tm);
+  double t_parse = (cli->time_stages || cli->time_per_function) ? rane_timer_elapsed_ms(&tm) : 0.0;
+  if (cli->time_stages || cli->time_per_function) rane_timer_start(&tm);
 
   diag = {};
   err = rane_typecheck_ast_ex(ast, &diag);
   if (err != RANE_OK) {
-    fprintf(stderr, "rane: typecheck failed (%u:%u): %s\n",
-            (unsigned)diag.span.line, (unsigned)diag.span.col, diag.message);
+    fprintf(stderr, "rane: typecheck failed: %s (%u:%u)\n",
+            diag.message,
+            (unsigned)diag.span.line,
+            (unsigned)diag.span.col);
     free(buf);
     return err;
   }
 
-  double t_tc = cli->time_stages ? rane_timer_elapsed_ms(&tm) : 0.0;
-  if (cli->time_stages) rane_timer_start(&tm);
+  double t_tc = (cli->time_stages || cli->time_per_function) ? rane_timer_elapsed_ms(&tm) : 0.0;
+  if (cli->time_stages || cli->time_per_function) rane_timer_start(&tm);
 
   rane_tir_module_t tir_mod = {};
   err = rane_lower_ast_to_tir(ast, &tir_mod);
   if (err != RANE_OK) {
-    fprintf(stderr, "rane: lowering failed (%d)\n", (int)err);
+    rane_print_error2("lower", input_path, err, "lowering failed");
     free(buf);
     return err;
   }
 
-  double t_lower = cli->time_stages ? rane_timer_elapsed_ms(&tm) : 0.0;
-
-  if (cli->time_stages) {
-    printf("time: parse=%.3fms typecheck=%.3fms lower=%.3fms\n", t_parse, t_tc, t_lower);
-  }
+  double t_lower = (cli->time_stages || cli->time_per_function) ? rane_timer_elapsed_ms(&tm) : 0.0;
 
   free(buf);
 
   if (out_ast) *out_ast = ast;
   if (out_tir) *out_tir = tir_mod;
+  if (out_t_parse_ms) *out_t_parse_ms = t_parse;
+  if (out_t_tc_ms) *out_t_tc_ms = t_tc;
+  if (out_t_lower_ms) *out_t_lower_ms = t_lower;
   return RANE_OK;
+}
+
+static rane_error_t rane_parse_typecheck_lower_for_file(
+  const rane_cli_options_t* cli,
+  rane_stmt_t** out_ast,
+  rane_tir_module_t* out_tir
+) {
+  return rane_parse_typecheck_lower_for_file_ex(cli, cli ? cli->input_path : NULL, out_ast, out_tir, NULL, NULL, NULL);
+}
+
+typedef struct rane_stage_times_s {
+  double parse_ms;
+  double typecheck_ms;
+  double lower_ms;
+  double ssa_ms;
+  double regalloc_ms;
+  double optimize_ms;
+  double driver_compile_ms;
+} rane_stage_times_t;
+
+static void rane_stage_times_zero(rane_stage_times_t* t) {
+  if (!t) return;
+  memset(t, 0, sizeof(*t));
+}
+
+static void rane_print_times_minimal(const rane_stage_times_t* t) {
+  if (!t) return;
+  printf("time: parse=%.3fms typecheck=%.3fms lower=%.3fms ssa=%.3fms regalloc=%.3fms opt=%.3fms driver_compile=%.3fms\n",
+         t->parse_ms, t->typecheck_ms, t->lower_ms, t->ssa_ms, t->regalloc_ms, t->optimize_ms, t->driver_compile_ms);
+}
+
+static void rane_per_function_pass_timing(const rane_tir_module_t* mod) {
+  if (!mod) return;
+
+  for (uint32_t fi = 0; fi < mod->function_count; fi++) {
+    // Work on a one-function module copy to isolate pass timing.
+    rane_tir_module_t one = {};
+    one.function_count = 1;
+    one.max_functions = 1;
+    one.functions = (rane_tir_function_t*)calloc(1, sizeof(rane_tir_function_t));
+    if (!one.functions) return;
+
+    const rane_tir_function_t* src = &mod->functions[fi];
+    rane_tir_function_t* dst = &one.functions[0];
+    memcpy(dst->name, src->name, sizeof(dst->name));
+    dst->inst_count = src->inst_count;
+    dst->max_insts = src->inst_count;
+    dst->stack_slot_count = src->stack_slot_count;
+    dst->insts = (rane_tir_inst_t*)calloc(dst->inst_count ? dst->inst_count : 1, sizeof(rane_tir_inst_t));
+    if (!dst->insts) { free(one.functions); return; }
+    if (dst->inst_count) memcpy(dst->insts, src->insts, dst->inst_count * sizeof(rane_tir_inst_t));
+
+    rane_timer_t tm;
+    double t_ssa = 0.0;
+    double t_ra = 0.0;
+    double t_opt = 0.0;
+
+    rane_timer_start(&tm);
+    rane_error_t e = rane_build_ssa(&one);
+    t_ssa = rane_timer_elapsed_ms(&tm);
+
+    if (e == RANE_OK) {
+      rane_timer_start(&tm);
+      e = rane_allocate_registers(&one);
+      t_ra = rane_timer_elapsed_ms(&tm);
+    }
+
+    if (e == RANE_OK) {
+      rane_timer_start(&tm);
+      e = rane_optimize_tir(&one);
+      t_opt = rane_timer_elapsed_ms(&tm);
+    }
+
+    printf("time-fn: %s ssa=%.3fms regalloc=%.3fms opt=%.3fms status=%d\n",
+           src->name, t_ssa, t_ra, t_opt, (int)e);
+
+    free(dst->insts);
+    free(one.functions);
+  }
 }
 
 static rane_error_t rane_compile_file_via_driver(const rane_cli_options_t* cli) {
@@ -653,7 +889,7 @@ static rane_error_t rane_compile_file_via_driver(const rane_cli_options_t* cli) 
   }
 
   if (err != RANE_OK) {
-    fprintf(stderr, "rane: compile failed (%d)\n", (int)err);
+    rane_print_error2("compile", cli->input_path, err, "compile failed");
     return err;
   }
 
@@ -661,26 +897,144 @@ static rane_error_t rane_compile_file_via_driver(const rane_cli_options_t* cli) 
   return RANE_OK;
 }
 
-static void rane_print_os_info() {
-  SYSTEM_INFO si;
-  GetSystemInfo(&si);
+static rane_error_t rane_compile_one_file_pipeline(
+  const rane_cli_options_t* cli,
+  const char* input_path,
+  const char* out_path,
+  rane_stage_times_t* out_times
+) {
+  if (out_times) rane_stage_times_zero(out_times);
+  if (!cli || !input_path || !out_path) return RANE_E_INVALID_ARG;
 
-  MEMORYSTATUSEX ms;
-  memset(&ms, 0, sizeof(ms));
-  ms.dwLength = sizeof(ms);
-  GlobalMemoryStatusEx(&ms);
+  // Use driver for final output (exe or C), but do our own front-end pass timings.
+  rane_stmt_t* ast = nullptr;
+  rane_tir_module_t tir_mod = {};
+  double t_parse = 0.0, t_tc = 0.0, t_lower = 0.0;
 
-  printf("OS: Windows\n");
-  printf("CPU: processors=%lu page_size=%lu alloc_granularity=%lu\n",
-         (unsigned long)si.dwNumberOfProcessors,
-         (unsigned long)si.dwPageSize,
-         (unsigned long)si.dwAllocationGranularity);
+  rane_error_t err = rane_parse_typecheck_lower_for_file_ex(cli, input_path, &ast, &tir_mod, &t_parse, &t_tc, &t_lower);
+  if (err != RANE_OK) return err;
 
-  printf("MEM: phys=%lluMB avail_phys=%lluMB commit_limit=%lluMB commit_avail=%lluMB\n",
-         (unsigned long long)(ms.ullTotalPhys / (1024ull * 1024ull)),
-         (unsigned long long)(ms.ullAvailPhys / (1024ull * 1024ull)),
-         (unsigned long long)(ms.ullTotalPageFile / (1024ull * 1024ull)),
-         (unsigned long long)(ms.ullAvailPageFile / (1024ull * 1024ull)));
+  rane_timer_t tm;
+  double t_ssa = 0.0, t_ra = 0.0, t_opt = 0.0;
+
+  rane_timer_start(&tm);
+  err = rane_build_ssa(&tir_mod);
+  t_ssa = rane_timer_elapsed_ms(&tm);
+  if (err != RANE_OK) return err;
+
+  rane_timer_start(&tm);
+  err = rane_allocate_registers(&tir_mod);
+  t_ra = rane_timer_elapsed_ms(&tm);
+  if (err != RANE_OK) return err;
+
+  rane_timer_start(&tm);
+  err = rane_optimize_tir(&tir_mod);
+  t_opt = rane_timer_elapsed_ms(&tm);
+  if (err != RANE_OK) return err;
+
+  if (cli->time_per_function) rane_per_function_pass_timing(&tir_mod);
+
+  rane_driver_options_t opts;
+  opts.input_path = input_path;
+  opts.output_path = out_path;
+  opts.opt_level = cli->opt_level;
+
+  rane_timer_start(&tm);
+  err = cli->emit_c ? rane_compile_file_to_c(&opts)
+                    : rane_compile_file_to_exe(&opts);
+  double t_driver = rane_timer_elapsed_ms(&tm);
+
+  if (out_times) {
+    out_times->parse_ms = t_parse;
+    out_times->typecheck_ms = t_tc;
+    out_times->lower_ms = t_lower;
+    out_times->ssa_ms = t_ssa;
+    out_times->regalloc_ms = t_ra;
+    out_times->optimize_ms = t_opt;
+    out_times->driver_compile_ms = t_driver;
+  }
+
+  return err;
+}
+
+static void rane_print_structured_kv(const char* k, const char* v) {
+  if (!k) return;
+  if (!v) v = "";
+  printf("%s=%s\n", k, v);
+}
+
+static void rane_print_structured_kv_u64(const char* k, unsigned long long v) {
+  if (!k) return;
+  printf("%s=%llu\n", k, v);
+}
+
+static void rane_print_structured_kv_f64(const char* k, double v) {
+  if (!k) return;
+  printf("%s=%.3f\n", k, v);
+}
+
+static rane_error_t rane_compile_all_win32(const rane_cli_options_t* cli, const char* pattern) {
+  if (!cli || !pattern || !pattern[0]) return RANE_E_INVALID_ARG;
+
+  char paths[2048][MAX_PATH];
+  uint32_t count = 0;
+  if (!rane_glob_files_win32(pattern, paths, 2048, &count) || count == 0) {
+    rane_print_error2("compile-all", pattern, RANE_E_OS_API_FAIL, "no files matched");
+    return RANE_E_OS_API_FAIL;
+  }
+
+  uint32_t ok = 0;
+  uint32_t fail = 0;
+
+  for (uint32_t i = 0; i < count; i++) {
+    char out_path[MAX_PATH];
+    rane_make_out_path_for_input(paths[i], cli->emit_c, out_path, sizeof(out_path));
+
+    rane_stage_times_t times;
+    rane_stage_times_zero(&times);
+
+    rane_error_t err = rane_compile_one_file_pipeline(cli, paths[i], out_path, (cli->time_stages || cli->time_per_function) ? &times : NULL);
+
+    if (cli->structured) {
+      rane_print_structured_kv("event", "compile");
+      rane_print_structured_kv("input", paths[i]);
+      rane_print_structured_kv("output", out_path);
+      rane_print_structured_kv_u64("status", (unsigned long long)err);
+
+      if (cli->time_stages || cli->time_per_function) {
+        rane_print_structured_kv_f64("parse_ms", times.parse_ms);
+        rane_print_structured_kv_f64("typecheck_ms", times.typecheck_ms);
+        rane_print_structured_kv_f64("lower_ms", times.lower_ms);
+        rane_print_structured_kv_f64("ssa_ms", times.ssa_ms);
+        rane_print_structured_kv_f64("regalloc_ms", times.regalloc_ms);
+        rane_print_structured_kv_f64("optimize_ms", times.optimize_ms);
+        rane_print_structured_kv_f64("driver_compile_ms", times.driver_compile_ms);
+      }
+      printf("\n");
+    } else {
+      if (err == RANE_OK) {
+        printf("ok: %s -> %s\n", paths[i], out_path);
+        if (cli->time_stages || cli->time_per_function) rane_print_times_minimal(&times);
+      } else {
+        fprintf(stderr, "fail: %s (%d)\n", paths[i], (int)err);
+      }
+    }
+
+    if (err == RANE_OK) ok++;
+    else fail++;
+  }
+
+  if (cli->structured) {
+    rane_print_structured_kv("event", "compile-all-summary");
+    rane_print_structured_kv_u64("files", (unsigned long long)count);
+    rane_print_structured_kv_u64("ok", (unsigned long long)ok);
+    rane_print_structured_kv_u64("fail", (unsigned long long)fail);
+    printf("\n");
+  } else {
+    printf("compile-all: files=%u ok=%u fail=%u\n", (unsigned)count, (unsigned)ok, (unsigned)fail);
+  }
+
+  return (fail == 0) ? RANE_OK : RANE_E_UNKNOWN;
 }
 
 static rane_error_t rane_print_cwd() {
@@ -733,10 +1087,32 @@ static rane_error_t rane_cat_file(const char* path) {
   return RANE_OK;
 }
 
+static void rane_print_os_info() {
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+
+  MEMORYSTATUSEX ms;
+  memset(&ms, 0, sizeof(ms));
+  ms.dwLength = sizeof(ms);
+  GlobalMemoryStatusEx(&ms);
+
+  printf("OS: Windows\n");
+  printf("CPU: processors=%lu page_size=%lu alloc_granularity=%lu\n",
+         (unsigned long)si.dwNumberOfProcessors,
+         (unsigned long)si.dwPageSize,
+         (unsigned long)si.dwAllocationGranularity);
+
+  printf("MEM: phys=%lluMB avail_phys=%lluMB commit_limit=%lluMB commit_avail=%lluMB\n",
+         (unsigned long long)(ms.ullTotalPhys / (1024ull * 1024ull)),
+         (unsigned long long)(ms.ullAvailPhys / (1024ull * 1024ull)),
+         (unsigned long long)(ms.ullTotalPageFile / (1024ull * 1024ull)),
+         (unsigned long long)(ms.ullAvailPageFile / (1024ull * 1024ull)));
+}
+
 static rane_error_t rane_sha256_file_cmd(const char* path) {
   uint8_t h[32];
   if (!rane_os_sha256_file(path, h)) {
-    fprintf(stderr, "rane: sha256 failed for %s\n", path ? path : "<null>");
+    rane_print_error2("sha256", path, RANE_E_OS_API_FAIL, "hash failed");
     return RANE_E_OS_API_FAIL;
   }
 
@@ -751,7 +1127,7 @@ static rane_error_t rane_run_exe(const char* exe_path, const char* args) {
   rane_os_proc_result_t r = {};
   if (!rane_os_run_process(exe_path, args, &r)) {
     DWORD gle = GetLastError();
-    fprintf(stderr, "rane: failed to run %s (GetLastError=%lu)\n", exe_path, (unsigned long)gle);
+    fprintf(stderr, "rane: run: %s failed (GetLastError=%lu)\n", exe_path, (unsigned long)gle);
     return RANE_E_OS_API_FAIL;
   }
 
@@ -759,42 +1135,83 @@ static rane_error_t rane_run_exe(const char* exe_path, const char* args) {
   return (r.exit_code == 0) ? RANE_OK : RANE_E_UNKNOWN;
 }
 
+static rane_error_t rane_run_selftest(const rane_cli_options_t* cli) {
+  if (!cli) return RANE_E_INVALID_ARG;
+
+  if (cli->structured) {
+    rane_print_structured_kv("event", "selftest-begin");
+    rane_print_structured_kv_u64("kind", (unsigned long long)cli->selftest_kind);
+    printf("\n");
+  }
+
+  switch (cli->selftest_kind) {
+    case RANE_SELFTEST_ALL:
+      // Only GC selftest is currently implemented in this repo.
+      rane_gc_run_selftest();
+      break;
+    case RANE_SELFTEST_GC:
+      rane_gc_run_selftest();
+      break;
+    case RANE_SELFTEST_LEXER:
+    case RANE_SELFTEST_PARSER:
+    case RANE_SELFTEST_TIR:
+    case RANE_SELFTEST_X64:
+      // Placeholders: no stable test APIs are exposed for these subsystems yet.
+      fprintf(stderr, "rane: selftest: subsystem not implemented yet\n");
+      return RANE_E_INVALID_ARG;
+    default:
+      return RANE_E_INVALID_ARG;
+  }
+
+  if (cli->structured) {
+    rane_print_structured_kv("event", "selftest-end");
+    rane_print_structured_kv_u64("status", 0ull);
+    printf("\n");
+  } else {
+    printf("selftest: ok\n");
+  }
+
+  return RANE_OK;
+}
+
 int main(int argc, char** argv) {
   rane_cli_options_t cli;
   if (!rane_cli_parse(argc, argv, &cli)) {
     rane_print_help();
-    return 2;
+    return RANE_EXIT_USAGE;
   }
 
-  if (cli.show_version) { rane_print_version(); return 0; }
-  if (cli.show_help) { rane_print_help(); return 0; }
+  if (cli.show_version) { rane_print_version(); return RANE_EXIT_OK; }
+  if (cli.show_help) { rane_print_help(); return RANE_EXIT_OK; }
 
   if (cli.os_info) {
     rane_print_os_info();
-    return 0;
+    return RANE_EXIT_OK;
   }
 
   if (cli.print_cwd) {
-    return (rane_print_cwd() == RANE_OK) ? 0 : 1;
+    return (rane_print_cwd() == RANE_OK) ? RANE_EXIT_OK : RANE_EXIT_TOOL_FAIL;
   }
 
   if (cli.env_name) {
-    return (rane_print_env(cli.env_name) == RANE_OK) ? 0 : 1;
+    return (rane_print_env(cli.env_name) == RANE_OK) ? RANE_EXIT_OK : RANE_EXIT_TOOL_FAIL;
   }
 
   if (cli.cat_path) {
-    return (rane_cat_file(cli.cat_path) == RANE_OK) ? 0 : 1;
+    return (rane_cat_file(cli.cat_path) == RANE_OK) ? RANE_EXIT_OK : RANE_EXIT_TOOL_FAIL;
   }
 
   if (cli.sha256_path) {
-    return (rane_sha256_file_cmd(cli.sha256_path) == RANE_OK) ? 0 : 1;
+    return (rane_sha256_file_cmd(cli.sha256_path) == RANE_OK) ? RANE_EXIT_OK : RANE_EXIT_TOOL_FAIL;
   }
 
   if (cli.run_selftest) {
-    rane_gc_run_selftest();
+    rane_error_t e = rane_run_selftest(&cli);
+    return (e == RANE_OK) ? RANE_EXIT_OK : RANE_EXIT_TOOL_FAIL;
   }
 
   if (cli.run_demo_pipeline) {
+    // Keep existing behavior (demo pipeline is not made structured in this patch).
     const char* source = "let x = 42;";
     rane_stmt_t* ast = nullptr;
     rane_diag_t diag = {};
@@ -829,74 +1246,119 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  if (cli.compile_all) {
+    rane_error_t e = rane_compile_all_win32(&cli, cli.compile_all_pattern);
+    return (e == RANE_OK) ? RANE_EXIT_OK : RANE_EXIT_COMPILE_FAIL;
+  }
+
   if (!cli.input_path) {
     rane_print_help();
-    return 2;
+    return RANE_EXIT_USAGE;
   }
 
   // --run: run an existing executable path directly.
   if (cli.run_after && !cli.emit_and_run) {
     rane_error_t err = rane_run_exe(cli.input_path, cli.run_args);
-    return (err == RANE_OK) ? 0 : 1;
+    return (err == RANE_OK) ? RANE_EXIT_OK : RANE_EXIT_TOOL_FAIL;
   }
 
   // --lex
   if (cli.lex_only) {
     rane_error_t err = rane_lex_file(cli.input_path);
-    return (err == RANE_OK) ? 0 : 1;
+    return (err == RANE_OK) ? RANE_EXIT_OK : RANE_EXIT_TOOL_FAIL;
   }
 
   // parse/typecheck only
   if (cli.parse_only || cli.typecheck_only || cli.dump_ast || cli.dump_tir || cli.dump_ssa || cli.dump_regalloc) {
     rane_stmt_t* ast = nullptr;
     rane_tir_module_t tir_mod = {};
-    rane_error_t err = rane_parse_typecheck_lower_for_file(&cli, &ast, &tir_mod);
-    if (err != RANE_OK) return 1;
+    rane_stage_times_t t;
+    rane_stage_times_zero(&t);
+
+    rane_error_t err = rane_parse_typecheck_lower_for_file_ex(&cli, cli.input_path, &ast, &tir_mod, &t.parse_ms, &t.typecheck_ms, &t.lower_ms);
+    if (err != RANE_OK) return RANE_EXIT_COMPILE_FAIL;
 
     if (cli.dump_ast) rane_dump_ast_minimal(ast);
 
     if (cli.parse_only) {
       printf("rane: parse ok\n");
-      return 0;
+      if (cli.time_stages) rane_print_times_minimal(&t);
+      return RANE_EXIT_OK;
     }
 
     if (cli.typecheck_only) {
       printf("rane: typecheck ok\n");
-      return 0;
+      if (cli.time_stages) rane_print_times_minimal(&t);
+      return RANE_EXIT_OK;
     }
 
     if (cli.dump_tir) rane_dump_tir_minimal_with_histogram(&tir_mod);
 
     if (cli.dump_ssa) {
+      rane_timer_t tm;
+      rane_timer_start(&tm);
       err = rane_build_ssa(&tir_mod);
-      if (err != RANE_OK) return 1;
+      t.ssa_ms = rane_timer_elapsed_ms(&tm);
+      if (err != RANE_OK) return RANE_EXIT_COMPILE_FAIL;
       printf("SSA: built\n");
     }
 
     if (cli.dump_regalloc) {
+      rane_timer_t tm;
+
+      rane_timer_start(&tm);
       err = rane_build_ssa(&tir_mod);
-      if (err != RANE_OK) return 1;
+      t.ssa_ms = rane_timer_elapsed_ms(&tm);
+      if (err != RANE_OK) return RANE_EXIT_COMPILE_FAIL;
+
+      rane_timer_start(&tm);
       err = rane_allocate_registers(&tir_mod);
-      if (err != RANE_OK) return 1;
+      t.regalloc_ms = rane_timer_elapsed_ms(&tm);
+      if (err != RANE_OK) return RANE_EXIT_COMPILE_FAIL;
+
       printf("Regalloc: completed\n");
     }
 
-    return 0;
+    if (cli.time_per_function) rane_per_function_pass_timing(&tir_mod);
+    if (cli.time_stages) rane_print_times_minimal(&t);
+
+    return RANE_EXIT_OK;
   }
 
-  // Default compile
-  rane_error_t err = rane_compile_file_via_driver(&cli);
-  if (err != RANE_OK) return 1;
+  // Default compile (single file)
+  {
+    const char* out = cli.output_path;
+    char auto_out[MAX_PATH];
+    if (!out) {
+      // preserve old defaults if no input given, but in single-file mode, generate from input for nicer UX
+      rane_make_out_path_for_input(cli.input_path, cli.emit_c, auto_out, sizeof(auto_out));
+      out = auto_out;
+    }
+
+    rane_stage_times_t t;
+    rane_stage_times_zero(&t);
+
+    rane_error_t err = rane_compile_one_file_pipeline(&cli, cli.input_path, out, (cli.time_stages || cli.time_per_function) ? &t : NULL);
+    if (err != RANE_OK) {
+      rane_print_error2("compile", cli.input_path, err, "failed");
+      return RANE_EXIT_COMPILE_FAIL;
+    }
+
+    if (!cli.structured) {
+      printf("rane: wrote %s\n", out);
+      if (cli.time_stages || cli.time_per_function) rane_print_times_minimal(&t);
+    }
+  }
 
   if (cli.emit_and_run) {
     if (cli.emit_c) {
       fprintf(stderr, "rane: --emit-and-run requires exe output (omit -emit-c)\n");
-      return 1;
+      return RANE_EXIT_USAGE;
     }
     const char* out = cli.output_path ? cli.output_path : "a.exe";
-    err = rane_run_exe(out, cli.run_args);
-    return (err == RANE_OK) ? 0 : 1;
+    rane_error_t err = rane_run_exe(out, cli.run_args);
+    return (err == RANE_OK) ? RANE_EXIT_OK : RANE_EXIT_TOOL_FAIL;
   }
 
-  return 0;
+  return RANE_EXIT_OK;
 }
