@@ -15,6 +15,14 @@ static uint8_t reg_code(uint8_t reg) {
 static uint8_t rex_w() { return 0x48; }
 static uint8_t rex_w_r(uint8_t r) { return 0x48 | ((r >> 3) & 0x1); } // for reg in opcode
 static uint8_t rex_w_rm(uint8_t reg, uint8_t rm) { return 0x48 | (((reg >> 3) & 0x1) << 2) | ((rm >> 3) & 0x1); }
+static uint8_t rex_w_rxb(uint8_t reg, uint8_t index, uint8_t base) {
+  // reg goes into ModRM.reg, index into SIB.index, base into ModRM.rm/SIB.base
+  // REX.W | REX.R (reg) | REX.X (index) | REX.B (base)
+  return (uint8_t)(0x48 |
+                   (((reg >> 3) & 0x1) << 2) |
+                   (((index >> 3) & 0x1) << 1) |
+                   ((base >> 3) & 0x1));
+}
 
 // ModRM byte
 static uint8_t modrm_byte(uint8_t mod, uint8_t reg, uint8_t rm) {
@@ -23,6 +31,31 @@ static uint8_t modrm_byte(uint8_t mod, uint8_t reg, uint8_t rm) {
 
 static uint32_t align_up_u32(uint32_t v, uint32_t a) {
   return (v + (a - 1)) & ~(a - 1);
+}
+
+static uint8_t sib_scale_bits(uint8_t scale) {
+  // Valid: 1,2,4,8 => 00,01,10,11
+  switch (scale) {
+    case 1: return 0;
+    case 2: return 1;
+    case 4: return 2;
+    case 8: return 3;
+    default: return 0;
+  }
+}
+
+static uint8_t cc_to_x64_jcc_subop(rane_x64_cc_t cc) {
+  // Map to low-nibble condition code used by 0F 9? (setcc) and 0F 4? (cmovcc).
+  // Signed comparisons follow the naming in `rane_tir_cc_t`.
+  switch (cc) {
+    case RANE_X64_CC_E:  return 0x4;
+    case RANE_X64_CC_NE: return 0x5;
+    case RANE_X64_CC_L:  return 0xC;
+    case RANE_X64_CC_LE: return 0xE;
+    case RANE_X64_CC_G:  return 0xF;
+    case RANE_X64_CC_GE: return 0xD;
+    default: return 0x5;
+  }
 }
 
 void rane_x64_init_emitter(rane_x64_emitter_t* e, uint8_t* buf, uint64_t size) {
@@ -80,6 +113,73 @@ void rane_x64_emit_mov_mem_reg(rane_x64_emitter_t* e, uint8_t base_reg, int32_t 
   rane_x64_emit_bytes(e, &opcode, 1);
   rane_x64_emit_bytes(e, &modrm_val, 1);
   if (mod == 0x2) rane_x64_emit_bytes(e, (uint8_t*)&disp, 4);
+}
+
+// mov r64, [base + index*scale + disp32]
+void rane_x64_emit_mov_reg_mem_sib(
+  rane_x64_emitter_t* e,
+  uint8_t dst_reg,
+  uint8_t base_reg,
+  uint8_t index_reg,
+  uint8_t scale,
+  int32_t disp
+) {
+  // Always encode with disp32 for simplicity/determinism.
+  // ModRM.rm=100 => SIB follows.
+  // SIB: [base + index*scale]
+  // index_reg==0 is treated as "no index" by the TIR; encode index=100 to mean "none".
+  uint8_t idx = index_reg ? index_reg : 4; // 4 => no index
+  uint8_t rex = rex_w_rxb(dst_reg, idx, base_reg);
+  uint8_t op = 0x8B;
+  uint8_t modrm = modrm_byte(0x2, reg_code(dst_reg), 0x4);
+  uint8_t sib = (uint8_t)((sib_scale_bits(scale) << 6) | (reg_code(idx) << 3) | reg_code(base_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+  rane_x64_emit_bytes(e, &sib, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&disp, 4);
+}
+
+// mov [base + index*scale + disp32], r64
+void rane_x64_emit_mov_mem_sib_reg(
+  rane_x64_emitter_t* e,
+  uint8_t base_reg,
+  uint8_t index_reg,
+  uint8_t scale,
+  int32_t disp,
+  uint8_t src_reg
+) {
+  uint8_t idx = index_reg ? index_reg : 4; // 4 => no index
+  uint8_t rex = rex_w_rxb(src_reg, idx, base_reg);
+  uint8_t op = 0x89;
+  uint8_t modrm = modrm_byte(0x2, reg_code(src_reg), 0x4);
+  uint8_t sib = (uint8_t)((sib_scale_bits(scale) << 6) | (reg_code(idx) << 3) | reg_code(base_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+  rane_x64_emit_bytes(e, &sib, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&disp, 4);
+}
+
+// lea r64, [base + index*scale + disp32]
+void rane_x64_emit_lea_reg_mem_sib(
+  rane_x64_emitter_t* e,
+  uint8_t dst_reg,
+  uint8_t base_reg,
+  uint8_t index_reg,
+  uint8_t scale,
+  int32_t disp
+) {
+  uint8_t idx = index_reg ? index_reg : 4; // 4 => no index
+  uint8_t rex = rex_w_rxb(dst_reg, idx, base_reg);
+  uint8_t op = 0x8D;
+  uint8_t modrm = modrm_byte(0x2, reg_code(dst_reg), 0x4);
+  uint8_t sib = (uint8_t)((sib_scale_bits(scale) << 6) | (reg_code(idx) << 3) | reg_code(base_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+  rane_x64_emit_bytes(e, &sib, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&disp, 4);
 }
 
 // [RSP + disp32] = reg
@@ -186,6 +286,82 @@ void rane_x64_emit_cmp_reg_imm(rane_x64_emitter_t* e, uint8_t reg, uint64_t imm)
   rane_x64_emit_bytes(e, &opcode, 1);
   rane_x64_emit_bytes(e, &modrm_val, 1);
   rane_x64_emit_bytes(e, (uint8_t*)&imm, 4);
+}
+
+// New: NEG r64 (REX.W + F7 /3)
+void rane_x64_emit_neg_reg(rane_x64_emitter_t* e, uint8_t reg) {
+  uint8_t rex = rex_w_r(reg);
+  uint8_t op = 0xF7;
+  uint8_t modrm = modrm_byte(0x3, 0x3, reg_code(reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// New: NOT r64 (REX.W + F7 /2)
+void rane_x64_emit_not_reg(rane_x64_emitter_t* e, uint8_t reg) {
+  uint8_t rex = rex_w_r(reg);
+  uint8_t op = 0xF7;
+  uint8_t modrm = modrm_byte(0x3, 0x2, reg_code(reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// New: TEST r/m64, r64 (REX.W + 85 /r)
+void rane_x64_emit_test_reg_reg(rane_x64_emitter_t* e, uint8_t reg1, uint8_t reg2) {
+  // test r/m64, r64 => opcode 85 /r with reg=reg2, rm=reg1
+  uint8_t rex = rex_w_rm(reg2, reg1);
+  uint8_t op = 0x85;
+  uint8_t modrm = modrm_byte(0x3, reg_code(reg2), reg_code(reg1));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// New: TEST r/m64, imm32 (REX.W + F7 /0 id)
+void rane_x64_emit_test_reg_imm32(rane_x64_emitter_t* e, uint8_t reg, uint32_t imm) {
+  uint8_t rex = rex_w_r(reg);
+  uint8_t op = 0xF7;
+  uint8_t modrm = modrm_byte(0x3, 0x0, reg_code(reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+  rane_x64_emit_bytes(e, (uint8_t*)&imm, 4);
+}
+
+// New: SETcc r/m8 (0F 90+cc /r)
+// NOTE: for SPL/BPL/SIL/DIL require a REX prefix; we always emit a minimal REX when needed.
+void rane_x64_emit_setcc_reg8(rane_x64_emitter_t* e, rane_x64_cc_t cc, uint8_t dst_reg) {
+  uint8_t ccsub = cc_to_x64_jcc_subop(cc);
+
+  // Use a REX prefix if reg is >= 8, or if reg is one of SPL/BPL/SIL/DIL (4..7).
+  // We emit 0x40 | B as needed (no W here; 8-bit op).
+  uint8_t need_rex = (dst_reg >= 8) || (dst_reg >= 4 && dst_reg <= 7);
+  if (need_rex) {
+    uint8_t rex = (uint8_t)(0x40 | ((dst_reg >> 3) & 0x1));
+    rane_x64_emit_bytes(e, &rex, 1);
+  }
+
+  uint8_t op1 = 0x0F;
+  uint8_t op2 = (uint8_t)(0x90 + ccsub);
+  uint8_t modrm = modrm_byte(0x3, 0x0, reg_code(dst_reg)); // /0, rm=dst
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
+}
+
+// New: CMOVcc r64, r64 (REX.W + 0F 40+cc /r)
+void rane_x64_emit_cmovcc_reg_reg(rane_x64_emitter_t* e, rane_x64_cc_t cc, uint8_t dst_reg, uint8_t src_reg) {
+  uint8_t ccsub = cc_to_x64_jcc_subop(cc);
+  uint8_t rex = rex_w_rm(dst_reg, src_reg); // reg=dst, rm=src
+  uint8_t op1 = 0x0F;
+  uint8_t op2 = (uint8_t)(0x40 + ccsub);
+  uint8_t modrm = modrm_byte(0x3, reg_code(dst_reg), reg_code(src_reg));
+  rane_x64_emit_bytes(e, &rex, 1);
+  rane_x64_emit_bytes(e, &op1, 1);
+  rane_x64_emit_bytes(e, &op2, 1);
+  rane_x64_emit_bytes(e, &modrm, 1);
 }
 
 // push r64: 0x50 + reg (low regs) + optional REX for r8-r15
@@ -417,7 +593,7 @@ static void emit_call_cleanup(rane_x64_emitter_t* e, rane_call_prep_state_t* st)
   st->active = 0;
 }
 
-static void rane_x64_emit_tir_inst_impl(rane_x64_emitter_t* e, const rane_tir_inst_t* inst, 
+static void rane_x64_emit_tir_inst_impl(rane_x64_emitter_t* e, const rane_tir_inst_t* inst,
   rane_codegen_ctx_t* ctx, const rane_x64_label_map_entry_t* labels, uint32_t label_count, rane_call_prep_state_t* cps) {
   if (!e || !inst) return;
 
@@ -455,6 +631,69 @@ static void rane_x64_emit_tir_inst_impl(rane_x64_emitter_t* e, const rane_tir_in
       return;
     }
 
+    case TIR_NEG: {
+      if (inst->operand_count != 1) return;
+      if (inst->operands[0].kind != TIR_OPERAND_R) return;
+      rane_x64_emit_neg_reg(e, (uint8_t)inst->operands[0].r);
+      return;
+    }
+
+    case TIR_NOT: {
+      if (inst->operand_count != 1) return;
+      if (inst->operands[0].kind != TIR_OPERAND_R) return;
+      rane_x64_emit_not_reg(e, (uint8_t)inst->operands[0].r);
+      return;
+    }
+
+    case TIR_TEST: {
+      // TEST rX, rY or TEST rX, imm32
+      if (inst->operand_count != 2) return;
+      if (inst->operands[0].kind != TIR_OPERAND_R) return;
+      uint8_t r0 = (uint8_t)inst->operands[0].r;
+
+      if (inst->operands[1].kind == TIR_OPERAND_R) {
+        rane_x64_emit_test_reg_reg(e, r0, (uint8_t)inst->operands[1].r);
+      } else if (inst->operands[1].kind == TIR_OPERAND_IMM) {
+        rane_x64_emit_test_reg_imm32(e, r0, (uint32_t)inst->operands[1].imm);
+      }
+      return;
+    }
+
+    case TIR_SETCC: {
+      // Operands (bootstrap convention):
+      //  - r0: dst
+      //  - imm0: cc (rane_tir_cc_t / rane_x64_cc_t)
+      if (inst->operand_count != 2) return;
+      if (inst->operands[0].kind != TIR_OPERAND_R) return;
+      if (inst->operands[1].kind != TIR_OPERAND_IMM) return;
+
+      uint8_t dst = (uint8_t)inst->operands[0].r;
+      rane_x64_cc_t cc = (rane_x64_cc_t)inst->operands[1].imm;
+
+      // Zero-extend strategy: xor dst,dst ; setcc dst8
+      rane_x64_emit_xor_reg_reg(e, dst, dst);
+      rane_x64_emit_setcc_reg8(e, cc, dst);
+      return;
+    }
+
+    case TIR_CMOVCC: {
+      // Operands (bootstrap convention):
+      //  - r0: dst
+      //  - r1: src
+      //  - imm: cc
+      if (inst->operand_count != 3) return;
+      if (inst->operands[0].kind != TIR_OPERAND_R) return;
+      if (inst->operands[1].kind != TIR_OPERAND_R) return;
+      if (inst->operands[2].kind != TIR_OPERAND_IMM) return;
+
+      uint8_t dst = (uint8_t)inst->operands[0].r;
+      uint8_t src = (uint8_t)inst->operands[1].r;
+      rane_x64_cc_t cc = (rane_x64_cc_t)inst->operands[2].imm;
+
+      rane_x64_emit_cmovcc_reg_reg(e, cc, dst, src);
+      return;
+    }
+
     case TIR_LD: {
       // LD rD, slot => mov rD, [rbp - (slot+1)*8]
       if (inst->operand_count != 2) return;
@@ -489,14 +728,58 @@ static void rane_x64_emit_tir_inst_impl(rane_x64_emitter_t* e, const rane_tir_in
     }
 
     case TIR_LDV: {
-      // LDV rD, [base+disp] (bootstrap supports only base+disp)
+      // LDV rD, [base + index*scale + disp]
       if (inst->operand_count != 2) return;
       if (inst->operands[0].kind != TIR_OPERAND_R) return;
       if (inst->operands[1].kind != TIR_OPERAND_M) return;
+
       uint8_t dst = (uint8_t)inst->operands[0].r;
       uint8_t base = (uint8_t)inst->operands[1].m.base_r;
+      uint8_t index = (uint8_t)inst->operands[1].m.index_r;
+      uint8_t scale = (uint8_t)inst->operands[1].m.scale;
       int32_t disp = inst->operands[1].m.disp;
-      rane_x64_emit_mov_reg_mem(e, dst, base, disp);
+
+      if (index != 0 || scale != 1) {
+        rane_x64_emit_mov_reg_mem_sib(e, dst, base, index, scale, disp);
+      } else {
+        rane_x64_emit_mov_reg_mem(e, dst, base, disp);
+      }
+      return;
+    }
+
+    case TIR_STV: {
+      // STV [base + index*scale + disp], rS
+      if (inst->operand_count != 2) return;
+      if (inst->operands[0].kind != TIR_OPERAND_M) return;
+      if (inst->operands[1].kind != TIR_OPERAND_R) return;
+
+      uint8_t base = (uint8_t)inst->operands[0].m.base_r;
+      uint8_t index = (uint8_t)inst->operands[0].m.index_r;
+      uint8_t scale = (uint8_t)inst->operands[0].m.scale;
+      int32_t disp = inst->operands[0].m.disp;
+      uint8_t src = (uint8_t)inst->operands[1].r;
+
+      if (index != 0 || scale != 1) {
+        rane_x64_emit_mov_mem_sib_reg(e, base, index, scale, disp, src);
+      } else {
+        rane_x64_emit_mov_mem_reg(e, base, disp, src);
+      }
+      return;
+    }
+
+    case TIR_LEA: {
+      // LEA rD, [base + index*scale + disp]
+      if (inst->operand_count != 2) return;
+      if (inst->operands[0].kind != TIR_OPERAND_R) return;
+      if (inst->operands[1].kind != TIR_OPERAND_M) return;
+
+      uint8_t dst = (uint8_t)inst->operands[0].r;
+      uint8_t base = (uint8_t)inst->operands[1].m.base_r;
+      uint8_t index = (uint8_t)inst->operands[1].m.index_r;
+      uint8_t scale = (uint8_t)inst->operands[1].m.scale;
+      int32_t disp = inst->operands[1].m.disp;
+
+      rane_x64_emit_lea_reg_mem_sib(e, dst, base, index, scale, disp);
       return;
     }
 
@@ -677,28 +960,72 @@ static uint32_t collect_labels(const rane_tir_function_t* f, rane_x64_emitter_t*
         if (in->operand_count == 2 && in->operands[0].kind == TIR_OPERAND_R && in->operands[1].kind == TIR_OPERAND_IMM) tmp.offset += 10;
         else if (in->operand_count == 2 && in->operands[0].kind == TIR_OPERAND_R && in->operands[1].kind == TIR_OPERAND_R) tmp.offset += 3;
         break;
+
+      case TIR_NEG:
+      case TIR_NOT:
+        tmp.offset += 3; // REX.W + F7 + ModRM
+        break;
+
+      case TIR_TEST:
+        // reg/reg: 3 bytes; reg/imm: 7 bytes
+        if (in->operand_count == 2 && in->operands[1].kind == TIR_OPERAND_IMM) tmp.offset += 7;
+        else tmp.offset += 3;
+        break;
+
+      case TIR_SETCC:
+        // xor r64,r64 (3) + setcc r/m8 (3 [+optional rex])
+        // Conservatively assume REX is needed => 7 total.
+        tmp.offset += 7;
+        break;
+
+      case TIR_CMOVCC:
+        tmp.offset += 4; // REX.W + 0F + 4? + ModRM
+        break;
+
       case TIR_LD:
-      case TIR_LDV:
         tmp.offset += 7; // mov r64, [rbp+disp32]
         break;
+
+      case TIR_LDV:
+        // base+disp: 7; sib: 8
+        if (in->operand_count == 2 && in->operands[1].kind == TIR_OPERAND_M &&
+            (in->operands[1].m.index_r != 0 || in->operands[1].m.scale != 1)) tmp.offset += 8;
+        else tmp.offset += 7;
+        break;
+
       case TIR_ST:
         if (in->operand_count == 2 && in->operands[0].kind == TIR_OPERAND_S && (in->operands[0].s & 0x80000000u)) tmp.offset += 8; // mov [rsp+disp32], reg
         else tmp.offset += 7; // mov [rbp+disp32], reg
         break;
+
+      case TIR_STV:
+        // base+disp: 7; sib: 8
+        if (in->operand_count == 2 && in->operands[0].kind == TIR_OPERAND_M &&
+            (in->operands[0].m.index_r != 0 || in->operands[0].m.scale != 1)) tmp.offset += 8;
+        else tmp.offset += 7;
+        break;
+
+      case TIR_LEA:
+        tmp.offset += 8; // REX.W + 8D + ModRM + SIB + disp32
+        break;
+
       case TIR_ADD:
       case TIR_SUB:
         tmp.offset += 3;
         break;
+
       case TIR_CMP:
-        // We emit CMP in two forms; both are currently 3 bytes in our emitter subset.
         tmp.offset += 3;
         break;
+
       case TIR_JMP:
         tmp.offset += 5;
         break;
+
       case TIR_JCC_EXT:
         tmp.offset += 6;
         break;
+
       case TIR_CALL_PREP: {
         uint32_t stack_arg_bytes = (uint32_t)in->operands[0].imm;
         uint32_t sub = win64_call_sub_amount(stack_arg_bytes);
@@ -708,10 +1035,12 @@ static uint32_t collect_labels(const rane_tir_function_t* f, rane_x64_emitter_t*
         tmp.offset += 7; // sub rsp, imm32
         break;
       }
+
       case TIR_CALL_LOCAL:
         tmp.offset += 5;
         if (cps.active) { tmp.offset += 7; cps.active = 0; }
         break;
+
       case TIR_CALL_IMPORT:
         if (strcmp(in->operands[0].lbl, "rane_rt_print") == 0) {
           tmp.offset += 3;  // mov rdx, rcx
@@ -720,11 +1049,13 @@ static uint32_t collect_labels(const rane_tir_function_t* f, rane_x64_emitter_t*
         tmp.offset += 9; // call placeholder
         if (cps.active) { tmp.offset += 7; cps.active = 0; }
         break;
+
       case TIR_RET:
       case TIR_RET_VAL:
         tmp.offset += 4; // mov rsp, rbp
         tmp.offset += 1 + 1; // pop rbp; ret
         break;
+
       default:
         break;
     }
@@ -805,9 +1136,6 @@ rane_error_t rane_x64_codegen_tir_to_machine(const rane_tir_module_t* tir_module
   rane_x64_emitter_t e;
   rane_x64_init_emitter(&e, ctx->code_buffer, ctx->buffer_size);
 
-  // We need fixups during emission, so mirror `rane_x64_emit_module` but pass ctx.
-  // Currently `rane_x64_emit_module` doesn't take ctx; do it inline here.
-
   rane_x64_label_map_entry_t labels[512];
   uint32_t label_count = 0;
 
@@ -832,7 +1160,6 @@ rane_error_t rane_x64_codegen_tir_to_machine(const rane_tir_module_t* tir_module
       label_count++;
     }
 
-    // function size
     rane_x64_emitter_t tmp2 = e;
     tmp2.offset = 0;
     rane_x64_label_map_entry_t dummy[1];
