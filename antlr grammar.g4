@@ -1187,3 +1187,197 @@ DOC_COMMENT
 
 // ... (existing rules and lexer remain unchanged)
 
+// ... (existing grammar above remains unchanged)
+
+///////////////////////////////////////////////////////////////////////////
+// 16) Maximal extensibility, meta, and future-proof parser rules for RANE
+//     - These rules further expand parser coverage for all advanced, meta, and system forms.
+//     - If not yet implemented, they serve as future test scaffolding.
+///////////////////////////////////////////////////////////////////////////
+
+// --- ADDED: advanced async/await/yield/coroutine/parallel/future forms ---
+stmt
+  // ... (existing alternatives)
+  | FUTURE stmt                                                        #stmtFuture
+  | ASYNC block                                                        #stmtAsyncBlock4
+  | AWAIT expr                                                         #stmtAwaitExpr4
+  | YIELD expr                                                         #stmtYieldExpr4
+  | COROUTINE block                                                    #stmtCoroutineBlock3
+  | PARALLEL block                                                     #stmtParallelBlock2
+  | TASK stmt                                                          #stmtTask
+
+FUTURE   : 'future';
+TASK     : 'task';
+
+// --- ADDED: advanced meta-programming, reflection, and introspection ---
+  | REFLECT expr                                                       #stmtReflect3
+  | META expr                                                          #stmtMetaExpr3
+  | TYPEOF LPAREN expr RPAREN                                          #stmtTypeofExpr3
+  | FIELDS LPAREN expr RPAREN                                          #stmtFieldsExpr3
+  | METHODS LPAREN expr RPAREN                                         #stmtMethodsExpr3
+  | EVAL expr                                                          #stmtEvalExpr2
+  | INSPECT expr                                                       #stmtInspect
+
+INSPECT  : 'inspect';
+
+// --- ADDED: advanced attribute/annotation/derive/singleton forms ---
+  | AT IDENTIFIER (LPAREN argList? RPAREN)? stmt                       #stmtAttrStmt4
+  | AT IDENTIFIER (LPAREN argList? RPAREN)? DEF IDENTIFIER LPAREN paramList? RPAREN block #stmtAttrProcDef3
+  | AT IDENTIFIER (LPAREN argList? RPAREN)? STRUCT IDENTIFIER COLON structFieldExt* END #stmtAttrStructDef2
+  | ANNOTATE LPAREN argList? RPAREN stmt                               #stmtAnnotate
+
+ANNOTATE : 'annotate';
+
+// --- ADDED: advanced resource management, region, zone, context ---
+  | DEFER block                                                        #stmtDeferBlock4
+  | USING IDENTIFIER ASSIGN expr block                                 #stmtUsingBlock3
+  | REGION IDENTIFIER block                                            #stmtRegionBlock2
+  | ZONE IDENTIFIER block                                              #stmtZoneBlock2
+  | CONTEXT IDENTIFIER block                                           #stmtContextBlock
+
+CONTEXT  : 'context';
+
+// --- ADDED: advanced error handling/result/option forms ---
+  | TRY block (CATCH LPAREN IDENTIFIER RPAREN block)? (FINALLY block)? #stmtTryCatchFinally4
+  | THROW expr                                                         #stmtThrow3
+  | CATCH LPAREN IDENTIFIER RPAREN block                               #stmtCatchBlock2
+  | FINALLY block                                                      #stmtFinallyBlock2
+  | ENSURE block                                                       #stmtEnsureBlock
+
+ENSURE   : 'ensure';
+
+// --- ADDED: advanced generics/templates/constraints/where/impl ---
+  | TEMPLATE LT templateParams GT DEF IDENTIFIER LPAREN paramList? RPAREN block (WHERE whereClause)? #stmtTemplateProcDef4
+  | TEMPLATE LT templateParams GT STRUCT IDENTIFIER COLON structFieldExt* END (WHERE whereClause)?   #stmtTemplateStructDef4
+  | IMPL typeExpr block                                                 #stmtImplBlock
+
+IMPL     : 'impl';
+
+// --- ADDED: advanced slicing/spread/rest/ellipsis/range ---
+  | LET LBRACKET IDENTIFIER (COMMA DOTDOT IDENTIFIER)? RBRACKET ASSIGN expr     #stmtArrayDestructure4
+  | LET LPAREN IDENTIFIER (COMMA IDENTIFIER)* RPAREN ASSIGN expr                #stmtTupleDestructure4
+  | LET IDENTIFIER ELLIPSIS ASSIGN expr                                         #stmtEllipsisDestructure2
+  | LET IDENTIFIER RANGE expr                                                   #stmtRangeDestructure
+
+ELLIPSIS : '...';
+RANGE    : '..';
+
+// --- ADDED: advanced match guards, pattern forms, and or-patterns ---
+matchCase
+  : CASE pattern (OR pattern)* (IF expr)? COLON stmtOrSemi*
+  | DEFAULT COLON stmtOrSemi*
+  ;
+
+// --- ADDED: advanced type unions/intersections/optionals/nullable/impl ---
+typeExpr
+  : typeExpr PIPE typeExpr      #typeUnion4
+  | typeExpr AMP typeExpr       #typeIntersection4
+  | typeExpr QUESTION           #typeOptional3
+  | typeExpr EXCLAM             #typeNonNull2
+  | baseTypeExpr                #typeBase4
+  ;
+
+baseTypeExpr
+  : IDENTIFIER
+  | IDENTIFIER LT typeExpr (COMMA typeExpr)* GT
+  ;
+
+// --- ADDED: advanced static assert/compile-time eval/constexpr/assume ---
+  | STATIC_ASSERT LPAREN expr (COMMA STRING_LITERAL)? RPAREN                #stmtStaticAssert4
+  | CONSTEXPR DEF IDENTIFIER LPAREN paramList? RPAREN block                 #stmtConstexprProcDef2
+  | ASSUME LPAREN expr RPAREN                                               #stmtAssume
+
+ASSUME   : 'assume';
+
+// --- ADDED: advanced macro hygiene/expansion/inline macros/expand ---
+  | MACRO IDENTIFIER macroParams ASSIGN macroBody                           #stmtMacroDef4
+  | INLINE MACRO IDENTIFIER macroParams ASSIGN macroBody                    #stmtInlineMacroDef2
+  | EXPAND IDENTIFIER LPAREN argList? RPAREN                                #stmtExpandMacro
+
+EXPAND   : 'expand';
+
+// --- ADDED: advanced operator overloading, user-defined literals, trait impl ---
+  | STRUCT IDENTIFIER COLON structFieldExt* operatorOverload* END           #stmtStructWithOpOverload4
+  | DEF IDENTIFIER LITERAL LPAREN paramList? RPAREN block                   #stmtUserDefinedLiteral2
+  | IMPL IDENTIFIER FOR typeExpr block                                      #stmtImplTrait
+
+FOR      : 'for';
+
+// --- ADDED: advanced event/observer/publisher/subscriber forms ---
+  | EVENT IDENTIFIER LPAREN paramList? RPAREN SEMI?                         #stmtEventDecl5
+  | SUBSCRIBE LPAREN IDENTIFIER COMMA expr RPAREN SEMI?                     #stmtSubscribeStmt5
+  | EMIT IDENTIFIER LPAREN argList? RPAREN SEMI?                            #stmtEmitStmt5
+  | PUBLISH IDENTIFIER LPAREN argList? RPAREN SEMI?                         #stmtPublishStmt3
+  | OBSERVE IDENTIFIER block                                                #stmtObserve
+
+OBSERVE  : 'observe';
+
+// --- ADDED: advanced pipeline/chain/monad forms ---
+  | expr (PIPE expr)+                                                       #stmtPipelineExpr4
+  | expr (ARROW expr)+                                                      #stmtArrowChainExpr2
+  | expr (RANGE expr)+                                                      #stmtRangeChainExpr
+
+// --- ADDED: advanced block/label forms, goto, mark, jump, checkpoint ---
+block
+  : LBRACE stmtOrSemi* RBRACE
+  | SYSTEM block
+  | ADMIN block
+  | SCORE block
+  | PLOT block
+  | PEAK block
+  | POINT block
+  | REG block
+  | EXCEPTION block
+  | ALIGN LPAREN INT_LITERAL RPAREN block
+  | MUTATE v1TargetExpr TO_KW expr
+  | CHECKPOINT IDENTIFIER block
+  | stmt // single-statement block
+  ;
+
+CHECKPOINT : 'checkpoint';
+
+// --- ADDED: advanced doc comment token (already present, but ensure not lost) ---
+DOC_COMMENT
+  : '///' ~[\r\n]* -> channel(HIDDEN)
+  ;
+
+// --- ADDED: advanced lambda, arrow, and function types ---
+lambdaExpr
+  : LAMBDA LPAREN paramList? RPAREN block
+  | LPAREN paramList? RPAREN ARROW expr
+  | LBRACE paramList? ARROW expr RBRACE
+  | FN LPAREN paramList? RPAREN ARROW typeExpr block
+  ;
+
+FN : 'fn';
+
+// --- ADDED: advanced tuple, array, and record destructuring ---
+destructure
+  : LPAREN IDENTIFIER (COMMA IDENTIFIER)* RPAREN
+  | LBRACKET IDENTIFIER (COMMA IDENTIFIER)* (COMMA)? RBRACKET
+  | IDENTIFIER DOTDOT IDENTIFIER
+  | IDENTIFIER ELLIPSIS
+  | IDENTIFIER RANGE IDENTIFIER
+  ;
+
+// --- ADDED: advanced pattern matching for tuples, arrays, records, and or-patterns ---
+pattern
+  : expr
+  | LBRACKET pattern (COMMA pattern)* (COMMA)? RBRACKET
+  | LPAREN pattern (COMMA pattern)* (COMMA)? RPAREN
+  | IDENTIFIER
+  | UNDERSCORE
+  | IDENTIFIER COLON pattern
+  | IDENTIFIER LPAREN pattern (COMMA pattern)* RPAREN
+  | pattern OR pattern
+  | pattern RANGE pattern
+  ;
+
+// --- ADDED: advanced pipeline/monad chaining ---
+pipelineBody
+  : (PIPE expr)+
+  | (ARROW expr)+
+  | (RANGE expr)+
+  ;
+
+// ... (existing rules and lexer remain unchanged)
