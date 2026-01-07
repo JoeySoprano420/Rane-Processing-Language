@@ -3,7 +3,12 @@
 
 RANE is a deterministic, statically typed, low‑level systems language with explicit foreign boundaries and an emphasis on clarity and analyzability.
 
-RANE is under active development. Some concepts referenced in older documents (e.g., advanced code features, full memory‑band semantics) are **planned**, not fully implemented yet.
+Minimalist, Bootstrap‑Friendly Architecture
+
+RANE is an experimental programming language and native‑code toolchain written in C++14.  
+The current repository contains a **bootstrap compiler** targeting **Windows x64**, producing a minimal **PE executable**. The focus of this stage is correctness, determinism, and a clean end‑to‑end pipeline.
+
+RANE is under active development. Some concepts referenced in older documents (e.g., advanced type features, full memory‑band semantics) are **planned**, not fully implemented yet.
 
 ---
 
@@ -55,6 +60,7 @@ Types are currently inferred. Internally, the compiler uses:
 ---
 
 # **Expressions**
+All of the following are fully supported:
 
 Supported expressions:
 
@@ -69,6 +75,7 @@ Supported expressions:
 ---
 
 # **Memory Builtins**
+These are built into the parser and lowered directly into TIR:
 
 These are built into the parser and lower directly into TIR:
 
@@ -91,10 +98,10 @@ Supported statements include:
 - `if cond then stmt [else stmt]`
 - `while cond do stmt`
 - `return;` / `return expr;`
-- Low‑level control flow:
-  - `label;`
-  - `jump label;`
-  - `goto cond -> true_label, false_label;`
+- Low‑level control flow:  
+  `label;`  
+  `jump label;`  
+  `goto cond -> true_label, false_label;`
 
 ---
 
@@ -145,6 +152,7 @@ mem copy dst, src, size;
 ---
 
 # **Zone Blocks**
+Parsed and treated as normal blocks in the bootstrap:
 
 Parsed and treated as normal blocks in the bootstrap compiler:
 
@@ -157,6 +165,7 @@ zone hot {
 ---
 
 # **Imports / Exports**
+These lower into TIR declarations:
 
 Imports / exports lower into TIR declarations:
 
@@ -193,18 +202,11 @@ Implemented components:
 
 ---
 
-# **`.rdata` Emission (Bootstrap)**
+# **Building**
+RANE builds with **Visual Studio (C++14)**.
 
-The compiler emits real `.rdata` content from TIR data directives:
-
-- `TIR_DATA_BEGIN <label>`
-- `TIR_DATA_ZSTR <ptr>`
-- `TIR_DATA_BYTES <ptr,len>`
-- `TIR_DATA_END`
-
-The `.exe` writer builds a `.rdata` blob from these directives and patches `TIR_ADDR_OF` callsites (which are emitted as RIP‑relative `lea`) to point at final `.rdata` virtual addresses.
-
-This replaces the earlier bootstrap approach of patching raw `mov reg, imm64` heap pointers.
+1. Open `Rane Processing Language.vcxproj`
+2. Build **Release | x64**
 
 ---
 
@@ -420,219 +422,115 @@ Typechecking ensures:
 
 ---
 
-## 8) Control flow and statements (implemented subset)
+# **Current Status**
+RANE is a functioning bootstrap compiler with:
 
-The AST includes many statements; the confirmed implemented/tested subset includes:
-
-### 8.1 Blocks
-- `{ ... }` blocks exist and are typechecked.
-
-### 8.2 `let`
-- `let name = expr;`
-
-### 8.3 Assignment
-- `name = expr;`
-- `_ = expr;` is used as an “expression statement” in some paths (discard result).
-
-### 8.4 `if` / `while`
-- exist in AST and are typechecked
-- bootstrap rule: condition must be `b1` or `u64`
-
-### 8.5 `proc` and `return`
-Example (from tests):
-
-````````
-proc add(x, y) {
-  return x + y;
-}
-
-let sum = add(21, 21);
-```
-
-Bootstrap typing for procedures:
-- params are treated as `u64`
-- return is treated as `u64` (bootstrap simplification)
+- A minimal but real language
+- Deterministic lowering and fixups
+- A typed IR
+- A working native backend
+- A prototype memory‑band loader
 
 ### 8.6 `break` / `continue`
 Tokens and AST exist; treat as implemented if present in parse paths you are using.
 
 ---
 
-## 9) v1 data model: `struct`, `set`, `add` (implemented)
+Here’s a clean, polished **Vision** section you can paste directly into your README.  
+It’s written to match the tone and structure of the rest of your document, and it reflects the direction RANE is clearly growing toward.
 
-This is demonstrated by `tests/v1_struct_basic.rane`.
-
-### 9.1 `struct` declaration
-Example:
-
-````````
-struct Point {
-  x: i32,
-  y: i32,
-}
-```
-
-### 9.2 Struct literals
-Named-field form:
-```rane
-let p = Point { x: 10, y: 20 };
-mem copy dst, src, size;
-```
-
-Position-independent bitcast form:
-```rane
-set p: Point = Point { x: 10, y: 20 };
-```
-
-### 9.3 `set` statement (two forms)
-Declaration + initialization:
-````````
-set p: Point = Point { x: 1, y: 2 };
-```
-
-Separate declaration and initialization:
-
-````````
-set p: Point;
-p = Point { x: 1, y: 2 };
-
-````````
-
-This is the code block that represents the suggested code change:
-
-````````markdown
-set m: u32 to h.magic
-```
-
-### 9.4 `add` statement
-Numeric update form:
-````````
-set m: u32 to h.magic;
-```
-
-Pointer update form:
-```rane
-set ptr: *i32 = addr(base, index, scale, disp);
-```
+You can drop this right after **Current Status**.
 
 ---
 ---
 
-## 10) v1 prose/node surface (implemented)
+# **Vision: The Future of RANE**
 
-### 10.1 `module`
+RANE’s long‑term direction extends far beyond the current bootstrap compiler.  
+The project aims to evolve into a **deterministic, capability‑oriented, multi‑stage systems language** with a focus on clarity, analyzability, and high‑performance native execution.
 
-````````
+Future development is centered around the following pillars:
 
-This is the code block that represents the suggested code change:
+## **1. A Rich, Explicit Type System**
+RANE will introduce a full suite of type‑level constructs designed for determinism and analyzability:
 
-````````markdown
+- **Type annotations** for all declarations  
+- **User‑defined types** (records, enums, tagged unions)  
+- **Capsules** as explicit, analyzable units of state + behavior  
+- **Containers** with predictable memory layout  
+- **Qualifiers** for purity, determinism, and side‑effect control  
+- **Specify clauses** for constraints and type‑level contracts  
 
-### 10.2 `node` blocks
+The goal is a type system that remains simple, explicit, and zero‑cost at runtime.
 
-````````
+## **2. Durations, Privileges, and Capability‑Oriented Semantics**
+RANE will adopt a capability‑driven execution model:
 
-This is the code block that represents the suggested code change:
+- **Durations** define where and how long values live  
+- **Privileges** define what code is allowed to do  
+- **Capability scopes** ensure safety without hidden checks or runtime overhead  
 
-````````markdown
+These features form a static, analyzable capability lattice that replaces implicit lifetimes, hidden conversions, and ad‑hoc access rules found in other systems languages.
 
-### 10.3 `start at node`
+## **3. Memory‑Band Architecture**
+The prototype loader will evolve into a full **multi‑band execution model**:
 
-````````
+- **CORE** — immutable, trusted code  
+- **AOT** — ahead‑of‑time compiled modules  
+- **JIT** — deterministic runtime specialization  
+- **META** — compile‑time execution and reflection  
+- **HEAP** — dynamic allocations  
+- **MMAP** — mapped regions and device memory  
 
-This is the code block that represents the suggested code change:
+Bands provide structure for optimization, safety, and predictable performance.
 
-````````markdown
+## **4. High‑Performance Native Execution**
+RANE aims to reach performance comparable to C, Zig, and Rust through:
 
-### 10.4 `go to node`
-Tokenized and AST exists; use in v1 control-flow programs where wired.
+- SSA‑based optimization  
+- Inlining, LTO, and PGO  
+- Auto‑vectorization and SIMD lowering  
+- Loop optimizations and unrolling  
+- A full register allocator  
+- Deterministic JIT specialization for hot paths  
 
-### 10.5 `say`
-`say expr` prints `text` or `bytes` (typechecked).
+The long‑term goal is **native‑class throughput with deterministic behavior**.
 
-### 10.6 `halt`
-Terminates execution in v1 programs.
-
----
-
-## 11) MMIO helpers (implemented)
-
-Example (from tests):
-
-````````
-
-This is the code block that represents the suggested code change:
-
-````````markdown
-
-### Semantics (bootstrap)
-- `mmio region <NAME> from <BASE> size <SIZE>` defines a region in compiler module state.
-- `read32 NAME, offsetExpr into varName` lowers into a load from that region.
-- `write32 NAME, offsetExpr, valueExpr` lowers into a store.
-
----
-
-## 12) Bulk memory helpers (implemented subset)
-
-### 12.1 `mem copy`
-Statement:
-
-````````
-
-This is the code block that represents the suggested code change:
-
-````````markdown
-
-Other tokens exist (`mem zero`, `mem fill`) but should be treated as reserved unless verified by tests/lowering in your active grammar path.
+## **5. Self‑Hosting and Toolchain Maturity**
+RANE will eventually compile itself, enabling:
 
 ---
 
-## 13) Imports / exports and the foreign boundary (bootstrap)
+A module system, improved diagnostics, and a standard library will support real‑world development.
 
-### 13.1 Import declarations
-Imports lower into TIR import metadata.
+## **6. Deterministic Multi‑Stage Programming**
+RANE’s META and JIT bands will support:
 
-Example:
+- Compile‑time code generation  
+- Runtime specialization  
+- Safe, deterministic multi‑stage execution  
+- Domain‑specific languages  
+- High‑performance pipelines and simulation engines  
 
-````````
-
-This is the code block that represents the suggested code change:
-
-````````markdown
-
-### 13.2 Export declarations
-Exports lower into TIR export metadata.
-
-Example:
-
-````````
-
-This is the code block that represents the suggested code change:
-
-````````markdown
-
-> Note
->
-> The bootstrap PE emitter currently has a minimal fixed `.idata` implementation that is primarily used for printing (`msvcrt.dll!printf`), and the call-fixup mechanism patches callsites accordingly.
+This enables patterns that are difficult or impossible in traditional AOT‑only languages.
 
 ---
 
-## 14) Output and printing (bootstrap)
+## Onboarding
 
-### 14.1 `say` (v1)
-- `say "Hello"` prints a `text` value.
-- Typechecking enforces `text|bytes`.
+See `onboarding.md` for a detailed onboarding guide (build prerequisites, compiler pipeline, language syntax and examples, imports/link directives, testing workflow, and roadmap milestones).
 
-### 14.2 `print(...)` (core)
-The core surface uses `print(s)` as in `tests/exhaustive_exprs.rane`.
-In bootstrap, this is lowered to an import call targeting `rane_rt_print`.
+---
 
-### 14.3 `rane_rt_print` mapping (`.exe` emission)
-The PE writer imports **`msvcrt.dll!printf`** and patches callsites named:
-- `printf`
-- `rane_rt_print`
+## 13) Performance (current and trajectory)
 
-to the same IAT entry.
+### Current performance characteristics
+- The compiler is a bootstrap toolchain focused on correctness and deterministic codegen.
+- Generated code is native x64 and runs at machine speed for the subset used.
+- Optimization passes exist but are intentionally small/limited in bootstrap:
+  - peephole MOV folding
+  - basic DCE
+  - (where implemented) constant folding / constexpr hooks
 
 This is a bootstrap compatibility strategy: codegen calls `rane_rt_print`, but the underlying import is `printf`.
 
