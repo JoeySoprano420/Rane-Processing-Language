@@ -8,6 +8,7 @@
 // This patch refactors per-function emission to return a code buffer + per-call-site
 // symbol mapping, and adds a COFF assembler that writes a single <out-prefix>.obj
 // containing .text, .data (for interned strings), symbol table and relocations.
+IRModule lower_program_to_ir(const Program& prog);
 
 #include <array>
 #include <cassert>
