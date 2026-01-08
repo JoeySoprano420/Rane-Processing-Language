@@ -1,2 +1,0 @@
-let msg = "Hello, RANE!";
-print(msg);
