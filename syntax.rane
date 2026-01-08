@@ -1,18 +1,12 @@
 // syntax.rane
-// Complete, exhaustive syntax coverage file for the RANE bootstrap compiler in this repo.
-// Goal: exercise every implemented syntactic form (lexer → parser → AST → TIR) in one place.
-//
-// IMPORTANT:
-// - This file targets the *current implementation* (what `rane_parser.cpp` accepts).
-// - Many lexer keywords are reserved but not parseable yet; they are listed in a comment block
-//   so they remain visible without breaking compilation.
+// Exhaustive syntax-coverage sheet (ACTUAL RANE SOURCE)
+// Targets what your bootstrap parser already accepts, and keeps future tokens scaffolded.
 
 ///////////////////////////////////////////////////////////////////////////
 // 0) Reserved / tokenized keywords (NOT necessarily parseable today)
-//    Source of truth: `rane_lexer.cpp` identifier_type()
+// Source of truth: rane_lexer.cpp identifier_type()
 ///////////////////////////////////////////////////////////////////////////
 //
-// Core/reserved examples (not exhaustive list here):
 // let if then else while do for break continue return ret
 // proc def call
 // import export include exclude
@@ -31,14 +25,13 @@
 // NOTE: Only a subset is accepted at statement position by the current parser.
 
 ///////////////////////////////////////////////////////////////////////////
-// 1) Imports (current parser: `import <sym>;` OR `import <sym> from "<dll>";` depending on branch)
-//    - This file sticks to the known-working older form used in tests: `import rane_rt_print;`
+// 1) Imports (known-working older form)
 ///////////////////////////////////////////////////////////////////////////
 
 import rane_rt_print;
 
 ///////////////////////////////////////////////////////////////////////////
-// 2) MMIO region decl + read32/write32 (statement forms)
+// 2) MMIO region decl + read32/write32
 ///////////////////////////////////////////////////////////////////////////
 
 mmio region REG from 4096 size 256;
@@ -48,7 +41,6 @@ mmio region REG from 4096 size 256;
 ///////////////////////////////////////////////////////////////////////////
 
 proc add5(a, b, c, d, e) {
-  // return expr;
   return a + b + c + d + e;
 }
 
@@ -61,15 +53,11 @@ proc identity(x) {
 ///////////////////////////////////////////////////////////////////////////
 
 proc main() {
-  ///////////////////////////////////////////////////////////////////////////
   // 4.1) let bindings
-  ///////////////////////////////////////////////////////////////////////////
   let a = 1;
   let b = 2;
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.2) literals
-  ///////////////////////////////////////////////////////////////////////////
   let i_dec = 123;
   let i_underscore = 1_000_000;
   let i_hex = 0xCAFE_BABE;
@@ -82,17 +70,13 @@ proc main() {
   let s1 = "with \\n escape";
   let n = null;
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.3) unary
-  ///////////////////////////////////////////////////////////////////////////
   let u0 = -i_dec;
   let u1 = not f;
   let u2 = !f;
   let u3 = ~i_dec;
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.4) binary arithmetic / bitwise / shifts
-  ///////////////////////////////////////////////////////////////////////////
   let ar0 = a + b;
   let ar1 = a - b;
   let ar2 = a * b;
@@ -106,16 +90,14 @@ proc main() {
   // word-form bitwise
   let bw3 = a xor b;
 
-  // shifts: symbol and word-forms both tokenize; current parser uses token precedence table
+  // shifts: word and symbol forms
   let sh0 = i_dec shl 2;
   let sh1 = i_dec shr 1;
   let sh2 = i_dec sar 1;
   let sh3 = i_dec << 1;
   let sh4 = i_dec >> 1;
 
-  ///////////////////////////////////////////////////////////////////////////
-  // 4.5) comparisons (return boolean in bootstrap: 0/1)
-  ///////////////////////////////////////////////////////////////////////////
+  // 4.5) comparisons (bootstrap bool: 0/1)
   let c0 = a < b;
   let c1 = a <= b;
   let c2 = a > b;
@@ -123,70 +105,53 @@ proc main() {
   let c4 = a == b;
   let c5 = a != b;
 
-  // v1 compatibility: single '=' is treated as equality in expression parsing
+  // v1 compatibility: single '=' treated as equality in expr parsing
   let c6 = a = b;
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.6) logical ops (short-circuit)
-  ///////////////////////////////////////////////////////////////////////////
   let l0 = c0 and c5;
   let l1 = c0 or c4;
   let l2 = c0 && c5;
   let l3 = c0 || c4;
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.7) ternary
-  ///////////////////////////////////////////////////////////////////////////
   let te0 = c0 ? a : b;
   let te1 = (a < b) ? (a + 1) : (b + 1);
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.8) choose max/min
-  ///////////////////////////////////////////////////////////////////////////
   let ch0 = choose max(a, b);
   let ch1 = choose min(a, b);
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.9) addr / load / store expression forms
-  ///////////////////////////////////////////////////////////////////////////
   let p0 = addr(4096, 4, 8, 16);
   let y0 = load(u32, addr(4096, 0, 1, 0));
   let z0 = store(u32, addr(4096, 0, 1, 8), 7);
 
-  ///////////////////////////////////////////////////////////////////////////
-  // 4.10) mmio sugar (read32/write32 are statements that build EXPR_MMIO_ADDR + EXPR_LOAD/STORE)
-  ///////////////////////////////////////////////////////////////////////////
+  // 4.10) mmio sugar statements
   let x = 0;
   read32 REG, 0 into x;
   write32 REG, 4, 123;
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.11) ident literal
-  ///////////////////////////////////////////////////////////////////////////
   let sym0 = #rane_rt_print;
   let sym1 = #REG;
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.12) calls (expression calls)
-  ///////////////////////////////////////////////////////////////////////////
   let sum = add5(1, 2, 3, 4, 5);
   let idv = identity(sum);
 
-  // print is a builtin lowered from EXPR_CALL named "print" => import "rane_rt_print" at lowering time
+  // print is builtin lowered from EXPR_CALL named "print"
   print(s0);
   print(sum);
   print(idv);
 
-  ///////////////////////////////////////////////////////////////////////////
   // 4.13) statement-form call + goto (bootstrap control flow)
-  ///////////////////////////////////////////////////////////////////////////
   call identity(123) into slot 1;
 
   // conditional goto: goto <expr> -> <true_label>, <false_label>;
   goto (a < b) -> L_true, L_false;
 
 label L_false;
-  // trap with optional argument
   trap 7;
   goto 1 -> L_end, L_end;
 
@@ -196,18 +161,12 @@ label L_true;
 label L_end;
   halt;
 
-  // return is present but unreachable after halt; keep for AST coverage
+  // unreachable; kept for AST coverage
   return 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////
-// 5) v1 node/prose surface + v1 struct surface (parse-only in this file)
-//
-// NOTE: The lowering path supports STMT_MODULE/STMT_NODE/STMT_START_AT/STMT_SAY/STMT_GO_NODE,
-// and v1 struct decl / set / add are parsed. In the current repo, these are used in tests.
-//
-// CAUTION: Mixing `proc main()` (core surface) and v1 `start at node` in the same file
-// may or may not be meaningful for runtime behavior, but it is still useful for syntax coverage.
+// 5) v1 node/prose surface + v1 struct surface (parse-only coverage)
 ///////////////////////////////////////////////////////////////////////////
 
 module demo_struct
@@ -220,7 +179,6 @@ struct Header:
 end
 
 node start:
-  // v1: set declaration form
   set h: Header to Header{
     magic: 0x52414E45
     version: 1
@@ -228,22 +186,15 @@ node start:
     size: 4096
   }
 
-  // v1: member read into typed var
   set m: u32 to h.magic
 
-  // v1: set assignment into member
   set h.version to 2
-
-  // v1: add numeric update
   add h.size by 512
 
-  // v1: say
   say "ok"
 
-  // v1: go to node
   go to node end_node
 
-  // v1: halt keyword (tokenized as KW_HALT; parser also has a legacy identifier check)
   halt
 end
 
@@ -255,1109 +206,73 @@ end
 start at node start
 
 ///////////////////////////////////////////////////////////////////////////
-// 6) Additional syntax coverage (extended forms)
-//    - These forms are not present above and may be supported by the parser.
-//    - If not yet implemented, they serve as future test scaffolding.
+// 6) Additional syntax coverage (only keep what your parser supports today)
+//    (If unsupported, comment out locally until implemented.)
 ///////////////////////////////////////////////////////////////////////////
 
-// 6.1) while loop (if supported)
-proc loop_example() {
-  let i = 0;
-  while i < 10 {
-    print(i);
-    i = i + 1;
-  }
-  return i;
-}
-
-// 6.2) if/else statement (if supported)
-proc cond_example(x) {
-  if x > 0 {
-    print("positive");
-  } else {
-    print("non-positive");
-  }
-  return 0;
-}
-
-// 6.3) for loop (if supported)
-proc for_example() {
-  for let j = 0; j < 5; j = j + 1 {
-    print(j);
-  }
-  return 0;
-}
-
-// 6.4) nested proc call and expression
-proc nested_call_example(a, b) {
-  return add5(a, b, identity(a), add5(1, 2, 3, 4, 5), 0);
-}
-
-// 6.5) struct instantiation and member access (core surface)
-proc struct_usage() {
-  let h = Header{
-    magic: 0x12345678
-    version: 2
-    flags: 1
-    size: 128
-  };
-  let m = h.magic;
-  let v = h.version;
-  print(m);
-  print(v);
-  return h.size;
-}
-
-// 6.6) match/case (if parser supports, otherwise as future test)
-proc match_example(val) {
-  match val {
-    case 0: print("zero");
-    case 1: print("one");
-    default: print("other");
-  }
-  return 0;
-}
-
-// 6.7) lambda expression (if supported)
-proc lambda_example() {
-  let f = lambda(x) { return x + 1; };
-  let y = f(10);
-  print(y);
-  return y;
-}
-
-// 6.8) typealias and alias (if supported)
-typealias word = u32;
-alias int32 = i32;
-
-// 6.9) const/constexpr/constinit (if supported)
-const PI = 3.14159;
-constexpr E = 2.71828;
-constinit ZERO = 0;
-
-// 6.10) enum declaration (if supported)
-enum Color {
-  Red,
-  Green,
-  Blue
-}
-
-// 6.11) try/catch/throw (if supported)
-proc try_catch_example() {
-  try {
-    throw 42;
-  } catch (e) {
-    print(e);
-  }
-  return 0;
-}
-
-///////////////////////////////////////////////////////////////////////////
-// 7) Further syntax coverage (experimental and edge forms)
-//    - These forms extend coverage for parser, lexer, and AST/TIR.
-//    - If not yet implemented, they serve as future test scaffolding.
-///////////////////////////////////////////////////////////////////////////
-
-// 7.1) Nested blocks and shadowing
-proc block_shadowing() {
-  let x = 1;
-  {
-    let x = 2;
-    print(x); // should print 2
-    {
-      let x = 3;
-      print(x); // should print 3
-    }
-    print(x); // should print 2
-  }
-  print(x); // should print 1
-  return x;
-}
-
-// 7.2) Multiple assignment (tuple destructure, if supported)
-proc multi_assign() {
-  let (a, b) = (10, 20);
-  print(a);
-  print(b);
-  return a + b;
-}
-
-// 7.3) Function pointer/callable variable (if supported)
-proc call_via_var() {
-  let fn = add5;
-  let result = fn(1, 2, 3, 4, 5);
-  print(result);
-  return result;
-}
-
-// 7.4) Inline struct initialization in call
-proc struct_inline_call() {
-  let s = Header{
-    magic: 0xDEADBEEF
-    version: 99
-    flags: 42
-    size: 2048
-  };
-  print(s.magic);
-  return s.size;
-}
-
-// 7.5) Chained member access (if supported)
-proc chained_member_access() {
-  let s = Header{
-    magic: 0xAABBCCDD
-    version: 7
-    flags: 0
-    size: 512
-  };
-  let v = s.version;
-  print(s.flags);
-  print(v);
-  return s.size;
-}
-
-// 7.6) Array/slice literal and indexing (if supported)
-proc array_usage() {
-  let arr = [1, 2, 3, 4, 5];
-  let first = arr[0];
-  let last = arr[4];
-  print(first);
-  print(last);
-  return arr[2];
-}
-
-// 7.7) Null coalescing and optional chaining (if supported)
-proc nullish_ops(opt) {
-  let val = opt ?? 42;
-  print(val);
-  // let res = opt?.field; // Uncomment if optional chaining is supported
-  return val;
-}
-
-// 7.8) Bitfield/bitmask usage (if supported)
-proc bitfield_ops() {
-  let mask = 0b1100_0011;
-  let set = mask | 0b0000_1100;
-  let clear = mask & ~0b0000_0011;
-  print(set);
-  print(clear);
-  return set ^ clear;
-}
-
-// 7.9) Static/inline/extern/virtual (if supported)
-static proc static_proc() {
-  return 123;
-}
-inline proc inline_proc(x) {
-  return x * x;
-}
-extern proc extern_proc(x, y);
-
-// 7.10) Namespace usage (if supported)
-namespace math {
-  proc square(x) { return x * x; }
-  proc cube(x) { return x * x * x; }
-}
-proc ns_usage() {
-  let a = math.square(3);
-  let b = math.cube(2);
-  print(a);
-  print(b);
-  return a + b;
-}
-
-// 7.11) Using pragma, ifdef, ifndef, define (if supported)
-pragma("optimize", "on");
-define FOO 123
-ifdef FOO
-  print("FOO is defined");
-endif
-ifndef BAR
-  print("BAR is not defined");
-endif
-
-// 7.12) Tuple literal and destructure (if supported)
-proc tuple_example() {
-  let tup = (1, "hi", true);
-  let (x, y, z) = tup;
-  print(x);
-  print(y);
-  print(z);
-  return x;
-}
-
-// 7.13) Pattern matching (if supported)
-proc pattern_match(val) {
-  match val {
-    case (1, _): print("tuple with 1");
-    case (_, "hi"): print("tuple with hi");
-    default: print("other");
-  }
-  return 0;
-}
-
-// 7.14) Advanced trap/exception forms (if supported)
-proc trap_forms() {
-  trap;
-  trap 99;
-  try {
-    trap 123;
-  } catch (e) {
-    print("trapped");
-  }
-  return 0;
-}
-
-///////////////////////////////////////////////////////////////////////////
-// 8) Even broader syntax coverage (edge, meta, and advanced forms)
-//    - These forms further stress-test the parser, lexer, and AST/TIR.
-//    - If not yet implemented, they serve as future test scaffolding.
-///////////////////////////////////////////////////////////////////////////
-
-// 8.1) Nested namespace and visibility modifiers (if supported)
-namespace outer {
-  public proc pub_fn() { return 1; }
-  private proc priv_fn() { return 2; }
-  namespace inner {
-    proc inner_fn() { return 3; }
-  }
-}
-
-// 8.2) Struct with default values and computed fields (if supported)
-struct WithDefaults:
-  a: u32 = 42
-  b: u32
-  c: u32 = a + 1
-end
-
-proc struct_defaults_usage() {
-  let w = WithDefaults{ b: 7 };
-  print(w.a);
-  print(w.b);
-  print(w.c);
-  return w.c;
-}
-
-// 8.3) Anonymous struct and inline type (if supported)
-proc anon_struct_usage() {
-  let s = struct { x: u8, y: u8 }{ x: 1, y: 2 };
-  print(s.x);
-  print(s.y);
-  return s.x + s.y;
-}
-
-// 8.4) Union type (if supported)
-union IntOrFloat {
-  i: i32
-  f: f32
-}
-proc union_usage() {
-  let u = IntOrFloat{ i: 42 };
-  print(u.i);
-  return 0;
-}
-
-// 8.5) Volatile/const/immutable/mutable (if supported)
-volatile let v = 123;
-const let c = 456;
-immutable let im = 789;
-mutable let m = 321;
-
-// 8.6) Function with default arguments (if supported)
-proc defarg(a, b = 10, c = 20) {
-  return a + b + c;
-}
-proc defarg_usage() {
-  let x = defarg(1);
-  let y = defarg(1, 2);
-  let z = defarg(1, 2, 3);
-  print(x);
-  print(y);
-  print(z);
-  return z;
-}
-
-// 8.7) Multi-dimensional array (if supported)
-proc multi_array() {
-  let mat = [[1,2],[3,4]];
-  print(mat[0][1]);
-  print(mat[1][0]);
-  return mat[1][1];
-}
-
-// 8.8) Casts and type conversions (if supported)
-proc cast_usage() {
-  let a = 123;
-  let b = cast(f32, a);
-  let c = (u8)a;
-  print(b);
-  print(c);
-  return 0;
-}
-
-// 8.9) Decorators/attributes (if supported)
-@inline
-proc fast_add(a, b) { return a + b; }
-
-@deprecated("use new_func instead")
-proc old_func() { return 0; }
-
-// 8.10) Macro usage (if supported)
-macro SQUARE(x) = (x) * (x)
-proc macro_usage() {
-  let y = SQUARE(5);
-  print(y);
-  return y;
-}
-
-// 8.11) Goto with computed label (if supported)
-proc computed_goto(idx) {
-  goto label_table[idx];
-label L0;
-  print("zero");
-label L1;
-  print("one");
-label L2;
-  print("two");
-  return 0;
-}
-
-// 8.12) Inline assembly (if supported)
-proc asm_usage() {
-  asm {
-    mov eax, 1
-    add eax, 2
-  }
-  return 0;
-}
-
-// 8.13) Complex pattern destructuring (if supported)
-proc destructure_example() {
-  let (a, (b, c)) = (1, (2, 3));
-  print(a);
-  print(b);
-  print(c);
-  return a + b + c;
-}
-
-// 8.14) Chained call and field access (if supported)
-proc chain_call_field() {
-  let res = identity(add5(1,2,3,4,5)).toString().length;
-  print(res);
-  return res;
-}
-
-// 8.15) Use of all reserved keywords as identifiers (if allowed)
-proc keyword_idents() {
-  let _if = 1;
-  let _then = 2;
-  let _else = 3;
-  let _while = 4;
-  let _do = 5;
-  let _for = 6;
-  let _break = 7;
-  let _continue = 8;
-  let _return = 9;
-  print(_if + _then + _else + _while + _do + _for + _break + _continue + _return);
-  return 0;
-}
-
-///////////////////////////////////////////////////////////////////////////
-// 9) Maximal syntax coverage (meta, concurrency, advanced, and esoteric forms)
-//    - These forms further push the parser, lexer, and AST/TIR.
-//    - If not yet implemented, they serve as future test scaffolding.
-///////////////////////////////////////////////////////////////////////////
-
-// 9.1) Concurrency primitives (if supported)
-mutex proc mutex_proc() {
-  lock(mutex1) {
-    print("locked");
-  }
-  return 0;
-}
-dedicate proc thread_proc() {
-  spawn thread_proc();
-  join thread_proc();
-  return 0;
-}
-
-// 9.2) Hot/cold/zone/guard (if supported)
-hot proc hot_fn() { return 1; }
-cold proc cold_fn() { return 2; }
-zone critical {
-  proc critical_fn() { return 3; }
-}
-guard proc guard_fn() {
-  if true {
-    print("guarded");
-  }
-  return 0;
-}
-
-// 9.3) Linear/nonlinear/primitive/tuple/handle/target (if supported)
-linear proc lin_fn(x) { return x + 1; }
-nonlinear proc nlin_fn(x) { return x * 2; }
-primitive proc prim_fn(x) { return x; }
-tuple proc tup_fn(a, b) { return (a, b); }
-handle proc handle_fn(h) { return h; }
-target proc target_fn(t) { return t; }
-
-// 9.4) Advanced type features (if supported)
-type Option<T> = struct { value: T, valid: bool }
-typealias MaybeInt = Option<i32>;
-proc option_usage() {
-  let o = Option<i32>{ value: 42, valid: true };
-  print(o.value);
-  return 0;
-}
-
-// 9.5) Advanced pattern matching (if supported)
-proc adv_pattern(val) {
-  match val {
-    case Some(x): print(x);
-    case None: print("none");
-    case [a, b, ..rest]: print(a); print(b);
-    default: print("other");
-  }
-  return 0;
-}
-
-// 9.6) Advanced macro and splice/split/difference (if supported)
-macro INCR(x) = x + 1
-macro DECR(x) = x - 1
-proc macro_adv_usage() {
-  let a = INCR(5);
-  let b = DECR(5);
-  print(a);
-  print(b);
-  return a - b;
-}
-splice proc spliced_fn() { return 0; }
-split proc split_fn() { return 0; }
-difference proc diff_fn() { return 0; }
-
-// 9.7) Exception/try/catch/finally/throw (if supported)
-proc try_finally_example() {
-  try {
-    print("try");
-  } catch (e) {
-    print("catch");
-  } finally {
-    print("finally");
-  }
-  return 0;
-}
-
-// 9.8) Advanced attribute/pragma/compile-time (if supported)
-@compile_time
-proc ct_fn() { return 42; }
-pragma("pack", 1)
-pragma("section", ".data")
-
-// 9.9) Advanced enum/bitflag/variant (if supported)
-enum Flags : u8 {
-  Read = 1,
-  Write = 2,
-  Exec = 4
-}
-enum Variant {
-  Int(i32),
-  Str(string),
-  None
-}
-proc enum_usage() {
-  let f = Flags.Read | Flags.Write;
-  let v = Variant.Int(42);
-  print(f);
-  print(v);
-  return 0;
-}
-
-// 9.10) Advanced tuple/array destructure (if supported)
-proc adv_tuple_array() {
-  let ((a, b), [c, d, ..rest]) = ((1, 2), [3, 4, 5, 6]);
-  print(a); print(b); print(c); print(d);
-  return a + b + c + d;
-}
-
-// 9.11) Use of all possible statement forms in a single block (if supported)
-proc all_stmt_forms() {
-  let x = 0;
-  if x == 0 { x = 1; }
-  else if x == 1 { x = 2; }
-  else { x = 3; }
-  while x < 5 { x = x + 1; }
-  for let i = 0; i < 2; i = i + 1 { x = x + i; }
-  match x {
-    case 0: x = 10;
-    default: x = 20;
-  }
-  try { x = x / 1; } catch (e) { x = 0; }
-  return x;
-}
-
-// 9.12) Use of all possible expression forms in a single statement (if supported)
-proc all_expr_forms(a, b, c) {
-  return (a + b) * (c - a) / (b | c) & (a ^ b) << 1 >> 2 == a != b && a < c || b > c ? a : b;
-}
-
-// 9.13) Use of every literal type (if supported)
-proc all_literals() {
-  let i = 42;
-  let f = 3.14;
-  let s = "string";
-  let b = true;
-  let n = null;
-  let arr = [1, 2, 3];
-  let tup = (1, "a", false);
-  let ch = 'c';
-  let bin = 0b1010;
-  let hex = 0xFF;
-  let oct = 0o77;
-  print(i); print(f); print(s); print(b); print(n); print(arr); print(tup); print(ch); print(bin); print(hex); print(oct);
-  return 0;
-}
-
-// 9.14) Use of every declaration modifier (if supported)
-static inline const volatile proc mod_fn() { return 0; }
-extern virtual proc extvirt_fn();
-protected proc prot_fn() { return 1; }
-public proc pub2_fn() { return 2; }
-private proc priv2_fn() { return 3; }
-
-// 9.15) Use of every control flow keyword (if supported)
-proc all_control_flow() {
-  let x = 0;
-  loop: while true {
-    x = x + 1;
-    if x == 2 { break loop; }
-    if x == 1 { continue loop; }
-    if x == 3 { goto end_label; }
-  }
-end_label:
-  return x;
-}
-
-///////////////////////////////////////////////////////////////////////////
-// 10) Ultimate syntax stress test (meta-programming, system, and exotic forms)
-//     - These forms further extend parser, lexer, and AST/TIR coverage.
-//     - If not yet implemented, they serve as future test scaffolding.
-///////////////////////////////////////////////////////////////////////////
-
-// 10.1) System/inline/extern/virtual/override/abstract (if supported)
-system proc sys_fn() { return 0; }
-inline extern proc inl_ext_fn(x);
-virtual proc virt_fn() { return 1; }
-override proc child_fn() { return 2; }
-abstract proc abs_fn(x);
-
-// 10.2) Constexpr/consteval/constinit (if supported)
-constexpr proc ce_fn() { return 42; }
-consteval proc cv_fn() { return 99; }
-constinit let ci = 1234;
-
-// 10.3) Advanced import/export/include/exclude (if supported)
-import math_utils from "mathlib";
-export proc exported_fn() { return 7; }
-include "extra_defs.rane";
-exclude "legacy_defs.rane";
-
-// 10.4) Advanced label/jump/goto/mark (if supported)
-proc jumpy() {
-  mark start;
-  let x = 0;
-  jump mid;
-  mark skip;
-  x = 99;
-  jump end;
-  mark mid;
-  x = 42;
-  jump skip;
-  mark end;
-  return x;
-}
-
-// 10.5) Advanced string/char/byte/escape/format (if supported)
-proc string_forms() {
-  let s1 = "multi\nline\nstring";
-  let s2 = "unicode: \u03A9";
-  let s3 = r"raw\no\escapes";
-  let c = '\n';
-  let b = 0xFFu8;
-  let f = $"value={42}";
-  print(s1); print(s2); print(s3); print(c); print(b); print(f);
-  return 0;
-}
-
-// 10.6) Advanced tuple/record/struct/array/union/variant (if supported)
-record Person { name: string, age: u8 }
-proc record_usage() {
-  let p = Person{ name: "Ada", age: 36 };
-  print(p.name); print(p.age);
-  return 0;
-}
-variant NumOrStr = i32 | string;
-proc variant_usage() {
-  let v: NumOrStr = 123;
-  print(v);
-  v = "abc";
-  print(v);
-  return 0;
-}
-
-// 10.7) Advanced function types (if supported)
-proc takes_fn_ptr(f: proc(i32) -> i32, x: i32) {
-  return f(x);
-}
-proc returns_fn_ptr(): proc(i32) -> i32 {
-  return identity;
-}
-
-// 10.8) Advanced generics/templates (if supported)
-template <T>
-proc generic_id(x: T) { return x; }
-proc generic_usage() {
-  let a = generic_id<i32>(5);
-  let b = generic_id<string>("hi");
-  print(a); print(b);
-  return 0;
-}
-
-// 10.9) Advanced match/decide/case/default (if supported)
-proc decide_example(x) {
-  decide x {
-    case 1: print("one");
-    case 2: print("two");
-    default: print("other");
-  }
-  return 0;
-}
-
-// 10.10) Advanced memory/align/allocate/mutate (if supported)
-align(16) struct Aligned {
-  x: u64
-}
-proc mem_ops() {
-  let ptr = allocate(Aligned, 1);
-  mutate ptr.x to 42;
-  print(ptr.x);
-  return 0;
-}
-
-// 10.11) Advanced open/close/with/using (if supported)
-proc file_ops() {
-  with open("file.txt") as f {
-    print(f.read());
-  }
-  using resource = acquire();
-  print(resource);
-  close(resource);
-  return 0;
-}
-
-// 10.12) Advanced admin/score/sys/plot/peak/point/reg/exception (if supported)
-admin proc admin_fn() { return 0; }
-score proc score_fn() { return 1; }
-sys proc sys2_fn() { return 2; }
-plot proc plot_fn() { return 3; }
-peak proc peak_fn() { return 4; }
-point proc point_fn() { return 5; }
-reg proc reg_fn() { return 6; }
-exception proc except_fn() { throw 1; }
-
-// 10.13) Advanced isolate/separate/join/declaration/compile (if supported)
-isolate proc iso_fn() { return 0; }
-separate proc sep_fn() { return 1; }
-join proc join_fn() { return 2; }
-declaration proc decl_fn() { return 3; }
-compile proc comp_fn() { return 4; }
-
-// 10.14) Advanced string/linear/nonlinear/primitives/tuples/member/open/close (if supported)
-string proc string_fn() { return "str"; }
-linear proc linear_fn() { return 1; }
-nonlinear proc nonlinear_fn() { return 2; }
-primitives proc prims_fn() { return 3; }
-tuples proc tups_fn() { return (1, 2); }
-member proc mem_fn() { return 4; }
-open proc open_fn() { return 5; }
-close proc close_fn() { return 6; }
-
-// 10.15) Advanced ignore/bypass/mutex/dedicate/increment/decrement (if supported)
-ignore proc ignore_fn() { return 0; }
-bypass proc bypass_fn() { return 1; }
-mutex proc mutex2_fn() { return 2; }
-dedicate proc dedicate2_fn() { return 3; }
-increment proc inc_fn(x) { return x + 1; }
-decrement proc dec_fn(x) { return x - 1; }
-
-///////////////////////////////////////////////////////////////////////////
-// 11) Hyper-extended syntax coverage (meta, async, reflection, and future forms)
-//     - These forms further expand parser, lexer, and AST/TIR coverage.
-//     - If not yet implemented, they serve as future test scaffolding.
-///////////////////////////////////////////////////////////////////////////
-
-// 11.1) Async/await/yield/coroutine (if supported)
-async proc async_fn() {
-  let v = await fetch_data();
-  print(v);
-  return v;
-}
-proc fetch_data() { return 123; }
-proc yield_example() {
-  yield 1;
-  yield 2;
-  return 0;
-}
-coroutine proc coro_fn() {
-  let x = yield 10;
-  print(x);
-  return x;
-}
-
-// 11.2) Reflection/introspection/meta (if supported)
-proc reflect_usage() {
-  let t = typeof(Header);
-  let f = fields(Header);
-  let m = methods(Header);
-  print(t); print(f); print(m);
-  return 0;
-}
-meta proc meta_fn() {
-  print("meta");
-  return 0;
-}
-
-// 11.3) Advanced attribute/annotation/derive (if supported)
-@derive(Eq, Ord, Debug)
-struct Point:
-  x: i32
-  y: i32
-end
-
-@singleton
-proc single_instance() { static let inst = 1; return inst; }
-
-// 11.4) Advanced resource management (if supported)
-proc defer_example() {
-  let f = open("file.txt");
-  defer { close(f); }
-  print(f);
-  return 0;
-}
-proc using_example() {
-  using conn = connect("db");
-  print(conn);
-  return 0;
-}
-
-// 11.5) Advanced error handling (if supported)
-proc result_example() {
-  let r = Result<int, string>.Ok(42);
-  if r.is_ok() {
-    print(r.unwrap());
-  } else {
-    print(r.err());
-  }
-  return 0;
-}
-proc option_example() {
-  let o = Option<int>.Some(5);
-  match o {
-    case Some(x): print(x);
-    case None: print("none");
-  }
-  return 0;
-}
-
-// 11.6) Advanced generics/constraints (if supported)
-template <T: Number>
-proc add_num(a: T, b: T) { return a + b; }
-proc generic_constraint_usage() {
-  let s = add_num(1, 2);
-  print(s);
-  return s;
-}
-
-// 11.7) Advanced slicing/spread/rest (if supported)
-proc slice_spread() {
-  let arr = [1,2,3,4,5];
-  let sub = arr[1..3];
-  let [head, ..tail] = arr;
-  print(head); print(tail);
-  return sub[0];
-}
-
-// 11.8) Advanced match guards (if supported)
-proc match_guard(x) {
-  match x {
-    case y if y > 10: print("gt 10");
-    case y if y < 0: print("lt 0");
-    default: print("other");
-  }
-  return 0;
-}
-
-// 11.9) Advanced type unions/intersections (if supported)
-type NumOrBool = int | bool;
-type NumAndDisplay = int & Display;
-proc union_intersection_usage() {
-  let a: NumOrBool = true;
-  print(a);
-  return 0;
-}
-
-// 11.10) Advanced static assert/compile-time eval (if supported)
-static_assert(1 + 1 == 2, "Math is broken");
-consteval proc eval_at_compile() { return 123; }
-
-// 11.11) Advanced doc comments/attributes (if supported)
-/// This is a doc comment for a function.
-/// It should be available via reflection.
-proc doc_example() { return 0; }
-
-/// This is a doc comment for a struct.
-struct DocStruct:
-  x: i32
-end
-
-// 11.12) Advanced macro hygiene/expansion (if supported)
-macro HYGIENIC(x) = let x = 42; print(x);
-proc macro_hygiene() {
-  HYGIENIC(y);
-  return 0;
-}
-
-// 11.13) Advanced operator overloading (if supported)
-struct Vec2:
-  x: f32
-  y: f32
-  proc +(self, other: Vec2) { return Vec2{ x: self.x + other.x, y: self.y + other.y }; }
-end
-proc op_overload_usage() {
-  let a = Vec2{ x: 1.0, y: 2.0 };
-  let b = Vec2{ x: 3.0, y: 4.0 };
-  let c = a + b;
-  print(c.x); print(c.y);
-  return 0;
-}
-
-// 11.14) Advanced event/observer/publisher/subscriber (if supported)
-event OnDataReceived(data: string);
-proc event_example() {
-  subscribe(OnDataReceived, print);
-  emit OnDataReceived("hello");
-  return 0;
-}
-
-// 11.15) Advanced pipeline/chain/monad (if supported)
-proc pipeline_example() {
-  let result = [1,2,3]
-    |> map(x => x * 2)
-    |> filter(x => x > 2)
-    |> reduce((a, b) => a + b, 0);
-  print(result);
-  return result;
-}
-```
-
-///////////////////////////////////////////////////////////////////////////
-// 12) Meta, system, async, and experimental forms (maximal coverage)
-//     - These forms further stress-test the parser, lexer, and AST/TIR.
-//     - If not yet implemented, they serve as future test scaffolding.
-///////////////////////////////////////////////////////////////////////////
-
-// 12.1) async/await/yield/coroutine/parallel (if supported)
-async proc async_sum(a, b) {
-  let result = await add5(a, b, 0, 0, 0);
-  return result;
-}
-proc yield_many() {
-  yield 1;
-  yield 2;
-  yield 3;
-  return 0;
-}
-coroutine proc coro_counter() {
-  let i = 0;
-  while i < 3 {
-    yield i;
-    i = i + 1;
-  }
-  return i;
-}
-parallel proc parallel_work() {
-  let a = async_sum(1, 2);
-  let b = async_sum(3, 4);
-  return a + b;
-}
-
-// 12.2) meta-programming, reflection, introspection (if supported)
-proc meta_reflect() {
-  let t = typeof(main);
-  let fs = fields(Header);
-  let ms = methods(Header);
-  let e = eval("1 + 2");
-  print(t); print(fs); print(ms); print(e);
-  return 0;
-}
-meta proc meta_proc() {
-  print("meta proc");
-  return 0;
-}
-
-// 12.3) advanced attribute/annotation/derive/singleton (if supported)
-@singleton
-struct Config:
-  value: i32 = 42
-end
-@deprecated("use new_func2 instead")
-proc old_func2() { return -1; }
-@inline
-@hot
-proc fast_hot(x) { return x * 2; }
-
-// 12.4) advanced resource management, region, zone (if supported)
-proc region_zone_example() {
-  region my_region {
-    let x = 1;
-    print(x);
-  }
-  zone critical_zone {
-    let y = 2;
-    print(y);
-  }
-  return 0;
-}
-
-// 12.5) advanced error handling/result/option (if supported)
-proc try_catch_finally() {
-  try {
-    print("try");
-    throw 1;
-  } catch (e) {
-    print("catch");
-  } finally {
-    print("finally");
-  }
-  return 0;
-}
-proc option_result_usage() {
-  let r = Result<i32, string>.Ok(7);
-  let o = Option<i32>.Some(8);
-  if r.is_ok() { print(r.unwrap()); }
-  if o.is_some() { print(o.unwrap()); }
-  return 0;
-}
-
-// 12.6) advanced generics/templates/constraints/where (if supported)
-template <T: Number, U: Number>
-proc add_generic(a: T, b: U) where T: Number, U: Number {
-  return a + b;
-}
-proc generic_where_usage() {
-  let s = add_generic(1, 2);
-  print(s);
-  return s;
-}
-
-// 12.7) advanced slicing/spread/rest/ellipsis (if supported)
-proc spread_ellipsis() {
-  let arr = [1,2,3,4,5];
-  let [head, ..tail] = arr;
-  let [a, b, ...rest] = arr;
-  print(head); print(tail); print(rest);
-  return arr[0];
-}
-
-// 12.8) advanced match guards, or-patterns, and pattern forms (if supported)
-proc match_or_guard(val) {
-  match val {
-    case 1 | 2: print("one or two");
-    case x if x > 10: print("gt 10");
-    default: print("other");
-  }
-  return 0;
-}
-
-// 12.9) advanced type unions/intersections/optionals/nullable (if supported)
-type IntOrStr = int | string;
-type IntAndDisplay = int & Display;
-type MaybeInt = int?;
-type NotNullInt = int!;
-proc type_union_intersect() {
-  let a: IntOrStr = 5;
-  let b: IntAndDisplay = 7;
-  let c: MaybeInt = null;
-  let d: NotNullInt = 9;
-  print(a); print(b); print(c); print(d);
-  return 0;
-}
-
-// 12.10) advanced static assert/compile-time eval/constexpr (if supported)
-static_assert(2 * 2 == 4, "Math still works");
-constexpr proc const_fn() { return 100; }
-consteval proc ceval_fn() { return 200; }
-
-// 12.11) advanced macro hygiene/expansion/inline macros (if supported)
-inline macro DOUBLE(x) = (x) * 2
-proc macro_inline_usage() {
-  let y = DOUBLE(21);
-  print(y);
-  return y;
-}
-
-// 12.12) advanced operator overloading, user-defined literals (if supported)
-struct MyNum:
-  value: i32
-  proc +(self, other: MyNum) { return MyNum{ value: self.value + other.value }; }
-  proc "my_lit"(s: string) { return MyNum{ value: parse_int(s) }; }
-end
-proc op_lit_usage() {
-  let a = MyNum{ value: 5 };
-  let b = MyNum{ value: 7 };
-  let c = a + b;
-  let d = MyNum"42";
-  print(c.value); print(d.value);
-  return 0;
-}
-
-// 12.13) advanced event/emit/subscribe/publish/handle/target/splice/split/difference (if supported)
-event OnCustom(data: int);
-proc event_pubsub() {
-  subscribe(OnCustom, print);
-  emit OnCustom(123);
-  publish OnCustom(456);
-  return 0;
-}
-handle proc handle_custom(h) { return h; }
-target proc target_custom(t) { return t; }
-splice proc spliced() { return 1; }
-split proc splitted() { return 2; }
-difference proc differ() { return 3; }
-
-// 12.14) advanced pipeline/chain/monad/arrow (if supported)
-proc pipeline_arrow() {
-  let result = [1,2,3]
-    |> map(x => x * 2)
-    |> filter(x => x > 2)
-    |> reduce((a, b) => a + b, 0)
-    -> to_string()
-    -> print;
-  return result;
-}
-
-// 12.15) advanced block/label/goto/mark/jump (if supported)
-proc advanced_labels() {
-  mark start;
-  let x = 0;
-  jump mid;
-  mark skip;
-  x = 99;
-  goto end;
-  mark mid;
-  x = 42;
-  goto skip;
-  mark end;
-  return x;
-}
-
+// proc loop_example() {
+//   let i = 0;
+//   while i < 10 {
+//     print(i);
+//     i = i + 1;
+//   }
+//   return i;
+// }
+//
+// proc cond_example(x) {
+//   if x > 0 {
+//     print("positive");
+//   } else {
+//     print("non-positive");
+//   }
+//   return 0;
+// }
+//
+// proc for_example() {
+//   for let j = 0; j < 5; j = j + 1 {
+//     print(j);
+//   }
+//   return 0;
+// }
+//
+// proc nested_call_example(a, b) {
+//   return add5(a, b, identity(a), add5(1, 2, 3, 4, 5), 0);
+// }
+//
+// proc match_example(val) {
+//   match val {
+//     case 0: print("zero");
+//     case 1: print("one");
+//     default: print("other");
+//   }
+//   return 0;
+// }
+//
+// proc lambda_example() {
+//   let f = lambda(x) { return x + 1; };
+//   let y = f(10);
+//   print(y);
+//   return y;
+// }
+//
+// typealias word = u32;
+// alias int32 = i32;
+//
+// const PI = 3.14159;
+// constexpr E = 2.71828;
+// constinit ZERO = 0;
+//
+// enum Color {
+//   Red,
+//   Green,
+//   Blue
+// }
+//
+// proc try_catch_example() {
+//   try {
+//     throw 42;
+//   } catch (e) {
+//     print(e);
+//   }
+//   return 0;
+// }
