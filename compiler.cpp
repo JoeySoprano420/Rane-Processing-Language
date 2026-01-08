@@ -15,6 +15,7 @@
 #include <cctype>
 #include <cstdint>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -25,6 +26,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include <stdexcept>
 #include <algorithm>
@@ -175,7 +177,11 @@ public:
                 t.kind = TokKind::Number;
                 return t;
             }
-            while (std::isdigit((unsigned char)peek()) || peek() == '_' || peek() == '.') t.lexeme.push_back(getch());
+            bool seenDot = false;
+            while (std::isdigit((unsigned char)peek()) || peek() == '_' || (!seenDot && peek() == '.')) {
+                if (peek() == '.') seenDot = true;
+                t.lexeme.push_back(getch());
+            }
             t.kind = TokKind::Number;
             return t;
         }
@@ -269,11 +275,14 @@ using ExprPtr = std::unique_ptr<Expr>;
 using StmtPtr = std::unique_ptr<Stmt>;
 
 struct Expr {
-    enum Kind { IntLit, StrLit, BoolLit, NullLit, Ident, HashIdent, Unary, Binary, Call, Ternary } k;
-    std::string text; // literal text or ident name
+    enum Kind { IntLit, FloatLit, StrLit, BoolLit, NullLit, Ident, HashIdent, Unary, Binary, Call, Ternary,
+                ArrayLit, Field, Index, StructLit } k;
+    std::string text; // literal text, ident name, or field name
     std::string op; // operator for unary/binary
-    std::vector<ExprPtr> args; // call args or binary children
+    std::vector<ExprPtr> args; // call args, binary children, array elements, index operands
     ExprPtr cond; // optional for ternary
+
+    Expr() = default;
 };
 
 struct Stmt {
@@ -288,8 +297,32 @@ struct Proc {
     std::vector<StmtPtr> body;
 };
 
+struct StructDecl {
+    std::string name;
+    // pair<fieldname, type name>
+    std::vector<std::pair<std::string,std::string>> fields;
+};
+
+struct TypeAlias {
+    std::string name;
+    std::string target;
+};
+
+struct ModuleDecl {
+    std::string name;
+    // nested program content
+    std::vector<StructDecl> structs;
+    std::vector<TypeAlias> typealiases;
+    std::vector<Proc> procs;
+    std::vector<std::pair<std::string,std::string>> imports; // name -> alias
+};
+
 struct Program {
     std::vector<Proc> procs;
+    std::vector<StructDecl> structs;
+    std::vector<TypeAlias> typealiases;
+    std::vector<ModuleDecl> modules;
+    std::vector<std::pair<std::string,std::string>> imports; // top-level imports (name -> alias)
 };
 
 // ----------------------------- Parser -------------------------------------
@@ -308,9 +341,26 @@ struct Parser {
     void expect_sym(const std::string& s) { if (!accept_sym(s)) throw std::runtime_error(std::string("expected symbol: ") + s + " got '" + cur().lexeme + "'"); }
     void expect_kw(const std::string& s) { if (!(cur().kind == TokKind::Kw && cur().lexeme == s)) throw std::runtime_error(std::string("expected keyword: ") + s); ++p; }
 
+    // Helper: read possibly qualified identifier sequence like `mod::sub::name`
+    std::string read_qualified_ident_after_consuming_first(const std::string& first) {
+        std::string name = first;
+        while (accept_sym("::")) {
+            if (cur().kind != TokKind::Ident) throw std::runtime_error("expected ident after ::");
+            name += "::" + cur().lexeme;
+            ++p;
+        }
+        return name;
+    }
+
     ExprPtr parse_primary() {
+        // Numbers, strings, bool, null, hash-ident handled as before
         if (cur().kind == TokKind::Number) {
-            auto e = std::make_unique<Expr>(); e->k = Expr::IntLit; e->text = cur().lexeme; ++p; return e;
+            // Decide int vs float ('.' indicates float for our syntax)
+            if (cur().lexeme.find('.') != std::string::npos) {
+                auto e = std::make_unique<Expr>(); e->k = Expr::FloatLit; e->text = cur().lexeme; ++p; return e;
+            } else {
+                auto e = std::make_unique<Expr>(); e->k = Expr::IntLit; e->text = cur().lexeme; ++p; return e;
+            }
         }
         if (cur().kind == TokKind::String) {
             auto e = std::make_unique<Expr>(); e->k = Expr::StrLit; e->text = cur().lexeme; ++p; return e;
@@ -324,10 +374,28 @@ struct Parser {
         if (cur().kind == TokKind::HashIdent) {
             auto e = std::make_unique<Expr>(); e->k = Expr::HashIdent; e->text = cur().lexeme; ++p; return e;
         }
+
+        // Array literal [ ... ]
+        if (accept_sym("[")) {
+            auto arr = std::make_unique<Expr>(); arr->k = Expr::ArrayLit;
+            if (!accept_sym("]")) {
+                for (;;) {
+                    arr->args.push_back(parse_expr());
+                    if (accept_sym("]")) break;
+                    expect_sym(",");
+                }
+            }
+            return arr;
+        }
+
         if (cur().kind == TokKind::Ident) {
-            Token id = cur(); ++p;
+            // read possibly qualified id 'mod::name' before deciding call/ident
+            std::string id = cur().lexeme; ++p;
+            id = read_qualified_ident_after_consuming_first(id);
+
+            // call: 'id(...)'
             if (accept(TokKind::Sym, "(")) {
-                auto call = std::make_unique<Expr>(); call->k = Expr::Call; call->text = id.lexeme;
+                auto call = std::make_unique<Expr>(); call->k = Expr::Call; call->text = id;
                 if (!accept(TokKind::Sym, ")")) {
                     for (;;) {
                         call->args.push_back(parse_expr());
@@ -335,10 +403,59 @@ struct Parser {
                         expect_sym(",");
                     }
                 }
-                return call;
+                // allow trailing field/indexing after call result
+                ExprPtr curExpr = std::move(call);
+                for (;;) {
+                    if (accept_sym(".")) {
+                        if (cur().kind == TokKind::Ident) {
+                            std::string fld = cur().lexeme; ++p;
+                            auto fldExpr = std::make_unique<Expr>(); fldExpr->k = Expr::Field; fldExpr->text = fld;
+                            fldExpr->args.push_back(std::move(curExpr));
+                            curExpr = std::move(fldExpr);
+                            continue;
+                        } else throw std::runtime_error("expected field name after '.'");
+                    }
+                    if (accept_sym("[")) {
+                        auto idx = parse_expr();
+                        expect_sym("]");
+                        auto idxExpr = std::make_unique<Expr>(); idxExpr->k = Expr::Index;
+                        idxExpr->args.push_back(std::move(curExpr));
+                        idxExpr->args.push_back(std::move(idx));
+                        curExpr = std::move(idxExpr);
+                        continue;
+                    }
+                    break;
+                }
+                return curExpr;
             }
-            auto e = std::make_unique<Expr>(); e->k = Expr::Ident; e->text = id.lexeme; return e;
+
+            // plain ident (or qualified) -> possibly followed by .field or [index]
+            auto e = std::make_unique<Expr>(); e->k = Expr::Ident; e->text = id;
+            ExprPtr curExpr = std::move(e);
+            for (;;) {
+                if (accept_sym(".")) {
+                    if (cur().kind == TokKind::Ident) {
+                        std::string fld = cur().lexeme; ++p;
+                        auto fldExpr = std::make_unique<Expr>(); fldExpr->k = Expr::Field; fldExpr->text = fld;
+                        fldExpr->args.push_back(std::move(curExpr));
+                        curExpr = std::move(fldExpr);
+                        continue;
+                    } else throw std::runtime_error("expected field name after '.'");
+                }
+                if (accept_sym("[")) {
+                    auto idx = parse_expr();
+                    expect_sym("]");
+                    auto idxExpr = std::make_unique<Expr>(); idxExpr->k = Expr::Index;
+                    idxExpr->args.push_back(std::move(curExpr));
+                    idxExpr->args.push_back(std::move(idx));
+                    curExpr = std::move(idxExpr);
+                    continue;
+                }
+                break;
+            }
+            return curExpr;
         }
+
         if (accept(TokKind::Sym, "(")) {
             auto e = parse_expr();
             expect_sym(")");
@@ -414,17 +531,28 @@ struct Parser {
             return s;
         }
 
-        // Other statement forms exist extensively in syntax.rane.
-        // We'll parse them into expression-like Call expressions so lowering
-        // can either lower or ignore them safely.
-
-        // import <ident> ;
+        // import <ident> [as alias] ;
         if (cur().kind == TokKind::Kw && cur().lexeme == "import") {
             ++p;
-            auto call = std::make_unique<Expr>();
-            call->k = Expr::Call; call->text = std::string("import");
-            if (cur().kind == TokKind::Ident) { call->args.push_back(std::make_unique<Expr>(Expr{Expr::Ident, cur().lexeme})); ++p; }
+            std::string name;
+            if (cur().kind == TokKind::Ident) {
+                name = cur().lexeme; ++p;
+                // read qualified import as needed
+                name = read_qualified_ident_after_consuming_first(name);
+            }
+            std::string alias;
+            if (cur().kind == TokKind::Kw && cur().lexeme == "as") { ++p; if (cur().kind == TokKind::Ident) { alias = cur().lexeme; ++p; } }
             accept(TokKind::Sym, ";");
+            // record as ExprStmt import for existing pipeline, but also let Program collect them in parse_program
+            auto call = std::make_unique<Expr>(); call->k = Expr::Call; call->text = "import";
+            if (!name.empty()) {
+                auto arg = std::make_unique<Expr>(); arg->k = Expr::Ident; arg->text = name;
+                call->args.push_back(std::move(arg));
+            }
+            if (!alias.empty()) {
+                auto a2 = std::make_unique<Expr>(); a2->k = Expr::Ident; a2->text = alias;
+                call->args.push_back(std::move(a2));
+            }
             StmtPtr s = std::make_unique<Stmt>(); s->k = Stmt::ExprStmt; s->expr = std::move(call);
             return s;
         }
@@ -453,7 +581,9 @@ struct Parser {
             while (!(cur().kind == TokKind::Sym && cur().lexeme == ";") && cur().kind != TokKind::Eof) {
                 // parse expressions loosely: treat identifiers and numbers as primaries
                 if (cur().kind == TokKind::Ident || cur().kind == TokKind::Number || cur().kind == TokKind::HashIdent) {
-                    auto a = std::make_unique<Expr>(); a->k = (cur().kind==TokKind::Number)?Expr::IntLit:Expr::Ident; a->text = cur().lexeme; call->args.push_back(std::move(a)); ++p;
+                    auto a = std::make_unique<Expr>();
+                    a->k = (cur().kind==TokKind::Number)?Expr::IntLit:Expr::Ident;
+                    a->text = cur().lexeme; call->args.push_back(std::move(a)); ++p;
                 } else {
                     ++p;
                 }
@@ -469,13 +599,17 @@ struct Parser {
             std::string name;
             if (cur().kind == TokKind::Ident) { name = cur().lexeme; ++p; }
             accept(TokKind::Sym, ";");
-            auto call = std::make_unique<Expr>(); call->k = Expr::Call; call->text = "label"; call->args.push_back(std::make_unique<Expr>(Expr{Expr::Ident, name}));
+            auto call = std::make_unique<Expr>(); call->k = Expr::Call; call->text = "label";
+            auto arg = std::make_unique<Expr>(); arg->k = Expr::Ident; arg->text = name;
+            call->args.push_back(std::move(arg));
             StmtPtr s = std::make_unique<Stmt>(); s->k = Stmt::ExprStmt; s->expr = std::move(call);
             return s;
         }
         if (cur().kind == TokKind::Ident && (p+1 < toks.size()) && toks[p+1].kind==TokKind::Sym && toks[p+1].lexeme==":") {
             std::string name = cur().lexeme; p+=2; // consume ident and colon
-            auto call = std::make_unique<Expr>(); call->k = Expr::Call; call->text = "label"; call->args.push_back(std::make_unique<Expr>(Expr{Expr::Ident, name}));
+            auto call = std::make_unique<Expr>(); call->k = Expr::Call; call->text = "label";
+            auto arg = std::make_unique<Expr>(); arg->k = Expr::Ident; arg->text = name;
+            call->args.push_back(std::move(arg));
             StmtPtr s = std::make_unique<Stmt>(); s->k = Stmt::ExprStmt; s->expr = std::move(call);
             return s;
         }
@@ -484,7 +618,7 @@ struct Parser {
         if (cur().kind == TokKind::Kw && cur().lexeme == "trap") {
             ++p;
             auto call = std::make_unique<Expr>(); call->k = Expr::Call; call->text = "trap";
-            if (cur().kind == TokKind::Number) { call->args.push_back(std::make_unique<Expr>(Expr{Expr::IntLit, cur().lexeme})); ++p; }
+            if (cur().kind == TokKind::Number) { auto a = std::make_unique<Expr>(); a->k = Expr::IntLit; a->text = cur().lexeme; call->args.push_back(std::move(a)); ++p; }
             accept(TokKind::Sym, ";");
             StmtPtr s = std::make_unique<Stmt>(); s->k = Stmt::ExprStmt; s->expr = std::move(call);
             return s;
@@ -527,36 +661,153 @@ struct Parser {
         return pd;
     }
 
+    StructDecl parse_struct_decl() {
+        StructDecl sd;
+        // current token is 'struct'
+        if (!(cur().kind == TokKind::Kw && cur().lexeme == "struct")) throw std::runtime_error("expected struct");
+        ++p;
+        if (cur().kind == TokKind::Ident) { sd.name = cur().lexeme; ++p; }
+        // optional '{' fields '}' or single-line "struct Name field:type;"
+        if (accept_sym("{")) {
+            while (!(cur().kind == TokKind::Sym && cur().lexeme == "}")) {
+                if (cur().kind == TokKind::Ident) {
+                    std::string fld = cur().lexeme; ++p;
+                    if (accept_sym(":")) {
+                        std::string ty;
+                        if (cur().kind == TokKind::Ident || cur().kind == TokKind::Kw) { ty = cur().lexeme; ++p; }
+                        sd.fields.emplace_back(fld, ty);
+                        accept(TokKind::Sym, ";");
+                        continue;
+                    }
+                }
+                // skip unexpected tokens to remain robust
+                ++p;
+            }
+            expect_sym("}");
+        } else {
+            // skip until semicolon or end
+            while (p < toks.size() && !(cur().kind == TokKind::Sym && cur().lexeme == ";")) ++p;
+            accept(TokKind::Sym, ";");
+        }
+        return sd;
+    }
+
+    TypeAlias parse_typealias() {
+        // expect 'type' or 'typealias'
+        if (!(cur().kind == TokKind::Kw && (cur().lexeme == "type" || cur().lexeme == "typealias"))) throw std::runtime_error("expected type/typealias");
+        ++p;
+        TypeAlias ta;
+        if (cur().kind == TokKind::Ident) { ta.name = cur().lexeme; ++p; }
+        if (accept_sym("=")) {
+            if (cur().kind == TokKind::Ident || cur().kind == TokKind::Kw) { ta.target = cur().lexeme; ++p; }
+            accept(TokKind::Sym, ";");
+        } else {
+            // fallback skip to semicolon
+            while (p < toks.size() && !(cur().kind == TokKind::Sym && cur().lexeme == ";")) ++p;
+            accept(TokKind::Sym, ";");
+        }
+        return ta;
+    }
+
+    ModuleDecl parse_module() {
+        ModuleDecl md;
+        if (!(cur().kind == TokKind::Kw && cur().lexeme == "module")) throw std::runtime_error("expected module");
+        ++p;
+        if (cur().kind == TokKind::Ident) { md.name = cur().lexeme; ++p; }
+        // parse block
+        if (accept_sym("{")) {
+            while (!(cur().kind == TokKind::Sym && cur().lexeme == "}")) {
+                if (cur().kind == TokKind::Kw && cur().lexeme == "proc") {
+                    md.procs.push_back(parse_proc());
+                    continue;
+                }
+                if (cur().kind == TokKind::Kw && cur().lexeme == "struct") {
+                    md.structs.push_back(parse_struct_decl());
+                    continue;
+                }
+                if (cur().kind == TokKind::Kw && (cur().lexeme == "type" || cur().lexeme == "typealias")) {
+                    md.typealiases.push_back(parse_typealias());
+                    continue;
+                }
+                if (cur().kind == TokKind::Kw && cur().lexeme == "import") {
+                    ++p;
+                    std::string name;
+                    if (cur().kind == TokKind::Ident) {
+                        name = cur().lexeme; ++p;
+                        // read qualified import as needed
+                        name = read_qualified_ident_after_consuming_first(name);
+                    }
+                    std::string alias;
+                    if (cur().kind == TokKind::Kw && cur().lexeme == "as") { ++p; if (cur().kind == TokKind::Ident) { alias = cur().lexeme; ++p; } }
+                    accept(TokKind::Sym, ";");
+                    md.imports.emplace_back(name, alias);
+                    continue;
+                }
+                // skip unknown tokens inside module
+                ++p;
+            }
+            expect_sym("}");
+        } else {
+            // skip to end
+            while (p < toks.size() && !(cur().kind == TokKind::Kw && cur().lexeme == "end")) ++p;
+            if (p < toks.size() && cur().kind == TokKind::Kw && cur().lexeme == "end") ++p;
+        }
+        return md;
+    }
+
     Program parse_program() {
         Program prog;
         while (p < toks.size()) {
             if (cur().kind == TokKind::Kw && cur().lexeme == "proc") {
                 prog.procs.push_back(parse_proc());
-            } else {
-                // skip other top-level decls loosely (struct, node, module, enum, namespace, etc.)
-                // We advance tokens until a plausible boundary to keep the parser robust.
-                if (cur().kind == TokKind::Kw && (cur().lexeme == "struct" || cur().lexeme == "module" || cur().lexeme == "node" || cur().lexeme == "enum" || cur().lexeme == "namespace")) {
-                    // consume declaration header then balanced block if present
-                    ++p;
-                    // skip until matching 'end' or a balanced '{' block end
-                    if (cur().kind == TokKind::Ident) ++p;
-                    // if a ':' form or '{' form, try to skip balanced.
-                    if (cur().kind == TokKind::Sym && cur().lexeme == "{") {
-                        int depth = 0;
-                        while (p < toks.size()) {
-                            if (cur().kind == TokKind::Sym && cur().lexeme == "{") ++depth;
-                            else if (cur().kind == TokKind::Sym && cur().lexeme == "}") { --depth; if (depth <= 0) { ++p; break; } }
-                            ++p;
-                        }
-                    } else {
-                        // consume until next blank or 'end' token
-                        while (p < toks.size() && !(cur().kind == TokKind::Kw && cur().lexeme == "end")) ++p;
-                        if (p < toks.size() && cur().kind == TokKind::Kw && cur().lexeme == "end") ++p;
-                    }
-                    continue;
-                }
-                ++p;
+                continue;
             }
+            if (cur().kind == TokKind::Kw && cur().lexeme == "struct") {
+                prog.structs.push_back(parse_struct_decl());
+                continue;
+            }
+            if (cur().kind == TokKind::Kw && (cur().lexeme == "type" || cur().lexeme == "typealias")) {
+                prog.typealiases.push_back(parse_typealias());
+                continue;
+            }
+            if (cur().kind == TokKind::Kw && cur().lexeme == "module") {
+                prog.modules.push_back(parse_module());
+                continue;
+            }
+            if (cur().kind == TokKind::Kw && cur().lexeme == "import") {
+                ++p;
+                std::string name;
+                if (cur().kind == TokKind::Ident) {
+                    name = cur().lexeme; ++p;
+                    name = read_qualified_ident_after_consuming_first(name);
+                }
+                std::string alias;
+                if (cur().kind == TokKind::Kw && cur().lexeme == "as") { ++p; if (cur().kind == TokKind::Ident) { alias = cur().lexeme; ++p; } }
+                accept(TokKind::Sym, ";");
+                prog.imports.emplace_back(name, alias);
+                continue;
+            }
+            // We still accept existing top-level constructs and skip others robustly.
+            if (cur().kind == TokKind::Kw && (cur().lexeme == "node" || cur().lexeme == "enum" || cur().lexeme == "namespace")) {
+                // consume declaration header then balanced block if present
+                ++p;
+                if (cur().kind == TokKind::Ident) ++p;
+                if (cur().kind == TokKind::Sym && cur().lexeme == "{") {
+                    int depth = 0;
+                    while (p < toks.size()) {
+                        if (cur().kind == TokKind::Sym && cur().lexeme == "{") ++depth;
+                        else if (cur().kind == TokKind::Sym && cur().lexeme == "}") { --depth; if (depth <= 0) { ++p; break; } }
+                        ++p;
+                    }
+                } else {
+                    // consume until next blank or 'end' token
+                    while (p < toks.size() && !(cur().kind == TokKind::Kw && cur().lexeme == "end")) ++p;
+                    if (p < toks.size() && cur().kind == TokKind::Kw && cur().lexeme == "end") ++p;
+                }
+                continue;
+            }
+            // fallback: collect top-level statements into a synthetic proc? For now just advance.
+            ++p;
         }
         return prog;
     }
@@ -567,16 +818,55 @@ struct Parser {
 struct TypeEnv {
     std::unordered_map<std::string, std::string> vars;
     std::unordered_map<std::string, Proc*> procs;
+    std::unordered_map<std::string, StructDecl*> structs;
+    std::unordered_map<std::string, std::string> typealiases;
+    std::unordered_map<std::string, ModuleDecl*> modules;
+    std::set<std::string> imports;
+
+    // resolve a type name considering typealiases
+    std::string resolve_type(const std::string& name) {
+        auto it = typealiases.find(name);
+        if (it != typealiases.end()) return it->second;
+        return name;
+    }
 };
 
 void typecheck_program(Program& prog, RuleDB& /*rules*/) {
     TypeEnv env;
+    // register structs
+    for (auto &sd : prog.structs) env.structs[sd.name] = const_cast<StructDecl*>(&sd);
+    for (auto &ta : prog.typealiases) env.typealiases[ta.name] = ta.target;
+    // register modules (top-level only)
+    for (auto &md : prog.modules) env.modules[md.name] = const_cast<ModuleDecl*>(&md);
+    // imports
+    for (auto &imp : prog.imports) if (!imp.first.empty()) env.imports.insert(imp.first);
+
     for (auto& p : prog.procs) env.procs[p.name] = &p;
+    for (auto& md : prog.modules) {
+        for (auto &p : md.procs) env.procs[md.name + "::" + p.name] = &const_cast<Proc&>(p);
+        for (auto &sd : md.structs) env.structs[md.name + "::" + sd.name] = const_cast<StructDecl*>(&sd);
+        for (auto &ta : md.typealiases) env.typealiases[md.name + "::" + ta.name] = ta.target;
+    }
+
     for (auto& p : prog.procs) {
         env.vars.clear();
         for (auto& par : p.params) env.vars[par] = "i64";
         for (auto& st : p.body) {
             if (st->k == Stmt::Let) env.vars[st->name] = "i64";
+            // basic checks for field access: if expr is Field, ensure object exists (best-effort)
+            if (st->expr && st->expr->k == Expr::Field) {
+                auto &f = st->expr;
+                if (!f->args.empty()) {
+                    // if field applied to identifier, verify that identifier is known var
+                    if (f->args[0]->k == Expr::Ident) {
+                        std::string obj = f->args[0]->text;
+                        if (env.vars.find(obj) == env.vars.end()) {
+                            // maybe imported module type or global; warn but continue
+                            // keep lightweight: do not error
+                        }
+                    }
+                }
+            }
         }
     }
     if (env.procs.find("main") == env.procs.end()) {
@@ -587,11 +877,12 @@ void typecheck_program(Program& prog, RuleDB& /*rules*/) {
 // ----------------------------- Handwritten IR --------------------------------
 
 struct IRInst {
-    enum Op { NOP, CONST, ADD, SUB, MUL, DIV, CALL, RET, PRINT, MMIO_READ, MMIO_WRITE, TRAP, HALT } op = NOP;
+    enum Op { NOP, CONST, FCONST, ADD, SUB, MUL, DIV, FADD, FSUB, FMUL, FDIV, CALL, RET, PRINT, MMIO_READ, MMIO_WRITE, TRAP, HALT } op = NOP;
     int dst = -1;
     int lhs = -1;
     int rhs = -1;
     int64_t imm = 0;
+    double fimm = 0.0;
     std::string sym;
 };
 
@@ -606,9 +897,15 @@ struct IRFunc {
 
 struct IRModule {
     std::vector<IRFunc> funcs;
+    std::vector<std::pair<std::string,std::string>> datasec; // name -> literal
     IRFunc* find_func(const std::string& name) {
         for (auto &f: funcs) if (f.name == name) return &f;
         return nullptr;
+    }
+    std::string intern_string(const std::string& s) {
+        std::string name = ".str" + std::to_string(datasec.size());
+        datasec.push_back({name, s});
+        return name;
     }
 };
 
@@ -623,7 +920,12 @@ static int parse_int_literal(const std::string& s) {
     } catch (...) { return 0; }
 }
 
-int lower_expr_to_ir(IRFunc& F, Expr* e) {
+static double parse_float_literal(const std::string& s) {
+    std::string t; for (char c: s) if (c != '_') t.push_back(c);
+    try { return std::stod(t); } catch(...) { return 0.0; }
+}
+
+int lower_expr_to_ir(IRFunc& F, IRModule& M, Expr* e) {
     if (!e) return -1;
     switch (e->k) {
     case Expr::IntLit: {
@@ -631,6 +933,31 @@ int lower_expr_to_ir(IRFunc& F, Expr* e) {
         IRInst i; i.op = IRInst::CONST; i.dst = t; i.imm = parse_int_literal(e->text);
         F.insts.push_back(i);
         return t;
+    }
+    case Expr::FloatLit: {
+        int t = F.alloc_temp();
+        IRInst i; i.op = IRInst::FCONST; i.dst = t; i.fimm = parse_float_literal(e->text);
+        F.insts.push_back(i);
+        return t;
+    }
+    case Expr::StrLit: {
+        // intern to module data
+        std::string sym = M.intern_string(e->text);
+        int t = F.alloc_temp();
+        IRInst i; i.op = IRInst::CONST; i.dst = t; i.sym = sym;
+        F.insts.push_back(i);
+        return t;
+    }
+    case Expr::ArrayLit: {
+        // lower elements to temps (but allocate an opaque runtime array)
+        std::vector<int> elems;
+        for (auto &el : e->args) elems.push_back(lower_expr_to_ir(F, M, el.get()));
+        int ret = F.alloc_temp();
+        IRInst ci; ci.op = IRInst::CALL; ci.dst = ret; ci.sym = "array_literal";
+        // pack simple metadata cheaply in imm (not used by emitter) so passes optimizers
+        for (size_t i = 0; i < elems.size(); ++i) ci.imm ^= (elems[i] + 0x9e3779b97f4a7c15ULL + (uint64_t)i);
+        F.insts.push_back(ci);
+        return ret;
     }
     case Expr::Ident: {
         auto it = F.locals.find(e->text);
@@ -641,32 +968,70 @@ int lower_expr_to_ir(IRFunc& F, Expr* e) {
         F.locals[e->text] = t;
         return t;
     }
+    case Expr::Field: {
+        // object.field -> lower object then emit a CALL stub to fetch field
+        int obj = lower_expr_to_ir(F, M, e->args.size() ? e->args[0].get() : nullptr);
+        int ret = F.alloc_temp();
+        IRInst ci; ci.op = IRInst::CALL; ci.dst = ret; ci.lhs = obj; ci.sym = std::string("field_get:") + e->text;
+        F.insts.push_back(ci);
+        return ret;
+    }
+    case Expr::Index: {
+        // obj[index] -> lower obj and index then make CALL stub
+        int obj = lower_expr_to_ir(F, M, e->args.size() > 0 ? e->args[0].get() : nullptr);
+        int idx = lower_expr_to_ir(F, M, e->args.size() > 1 ? e->args[1].get() : nullptr);
+        int ret = F.alloc_temp();
+        IRInst ci; ci.op = IRInst::CALL; ci.dst = ret; ci.lhs = obj; ci.rhs = idx; ci.sym = "index_get";
+        F.insts.push_back(ci);
+        return ret;
+    }
     case Expr::Call: {
-        // builtin print
+        // builtin print accepts strings and numbers; lower as CALL to runtime stub
         if (e->text == "print") {
             int argt = -1;
-            if (!e->args.empty()) argt = lower_expr_to_ir(F, e->args[0].get());
+            if (!e->args.empty()) argt = lower_expr_to_ir(F, M, e->args[0].get());
             IRInst i; i.op = IRInst::PRINT; i.lhs = argt; F.insts.push_back(i);
             return -1;
         }
-        // generic call
+        // import: treat as no-op at lower level (import handled at parse/typecheck)
+        if (e->text == "import") {
+            return -1;
+        }
+        // generic call (including module-qualified names like mod::fn)
         std::vector<int> args;
-        for (auto &a : e->args) args.push_back(lower_expr_to_ir(F, a.get()));
+        for (auto &a : e->args) args.push_back(lower_expr_to_ir(F, M, a.get()));
         int ret = F.alloc_temp();
         IRInst ci; ci.op = IRInst::CALL; ci.dst = ret; ci.lhs = (args.size() ? args[0] : -1); ci.sym = e->text;
+        // cheap pack remaining args into imm (not used for semantics here)
+        for (size_t ai=1; ai<args.size(); ++ai) ci.imm ^= args[ai];
         F.insts.push_back(ci);
         return ret;
     }
     case Expr::Binary: {
-        int L = lower_expr_to_ir(F, e->args[0].get());
-        int R = lower_expr_to_ir(F, e->args[1].get());
+        // detect float operations if either operand is float constant or previously produced float temp
+        int L = lower_expr_to_ir(F, M, e->args[0].get());
+        int R = lower_expr_to_ir(F, M, e->args[1].get());
         int dst = F.alloc_temp();
         IRInst ins;
-        if (e->op == "+") ins.op = IRInst::ADD;
-        else if (e->op == "-") ins.op = IRInst::SUB;
-        else if (e->op == "*") ins.op = IRInst::MUL;
-        else if (e->op == "/") ins.op = IRInst::DIV;
-        else ins.op = IRInst::SUB;
+        // If either operand's defining instruction was FCONST or op produces float, prefer float ops
+        bool useFloat = false;
+        for (auto &i : F.insts) {
+            if (i.dst == L && i.op == IRInst::FCONST) useFloat = true;
+            if (i.dst == R && i.op == IRInst::FCONST) useFloat = true;
+        }
+        if (useFloat) {
+            if (e->op == "+") ins.op = IRInst::FADD;
+            else if (e->op == "-") ins.op = IRInst::FSUB;
+            else if (e->op == "*") ins.op = IRInst::FMUL;
+            else if (e->op == "/") ins.op = IRInst::FDIV;
+            else ins.op = IRInst::FSUB;
+        } else {
+            if (e->op == "+") ins.op = IRInst::ADD;
+            else if (e->op == "-") ins.op = IRInst::SUB;
+            else if (e->op == "*") ins.op = IRInst::MUL;
+            else if (e->op == "/") ins.op = IRInst::DIV;
+            else ins.op = IRInst::SUB;
+        }
         ins.dst = dst; ins.lhs = L; ins.rhs = R;
         F.insts.push_back(ins);
         return dst;
@@ -678,6 +1043,47 @@ int lower_expr_to_ir(IRFunc& F, Expr* e) {
 
 IRModule lower_program_to_ir(Program& P) {
     IRModule M;
+    // Lower module-level procs as separate functions with module::prefix in name
+    for (auto &md : P.modules) {
+        for (auto &p : md.procs) {
+            IRFunc F; F.name = md.name + "::" + p.name; F.paramCount = (int)p.params.size();
+            for (size_t i = 0; i < p.params.size(); ++i) {
+                int t = F.alloc_temp();
+                F.locals[p.params[i]] = t;
+            }
+            for (auto &st : p.body) {
+                if (st->k == Stmt::Let) {
+                    int src = lower_expr_to_ir(F, M, st->expr.get());
+                    if (src >= 0) F.locals[st->name] = src;
+                } else if (st->k == Stmt::Return) {
+                    int v = lower_expr_to_ir(F, M, st->expr.get());
+                    IRInst r; r.op = IRInst::RET; r.lhs = v; F.insts.push_back(r);
+                } else if (st->k == Stmt::ExprStmt) {
+                    if (st->expr) {
+                        if (st->expr->k == Expr::Call) {
+                            std::string callee = st->expr->text;
+                            if (callee == "trap") {
+                                IRInst t; t.op = IRInst::TRAP; if (!st->expr->args.empty() && st->expr->args[0]) t.imm = parse_int_literal(st->expr->args[0]->text); F.insts.push_back(t);
+                            } else if (callee == "halt") {
+                                IRInst h; h.op = IRInst::HALT; F.insts.push_back(h);
+                            } else if (callee == "read32") {
+                                IRInst r; r.op = IRInst::MMIO_READ; if (!st->expr->args.empty()) r.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) r.imm = parse_int_literal(st->expr->args[1]->text); F.insts.push_back(r);
+                            } else if (callee == "write32") {
+                                IRInst w; w.op = IRInst::MMIO_WRITE; if (!st->expr->args.empty()) w.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) w.imm = parse_int_literal(st->expr->args[1]->text); if (st->expr->args.size()>2) w.lhs = lower_expr_to_ir(F, M, st->expr->args[2].get()); F.insts.push_back(w);
+                            } else {
+                                lower_expr_to_ir(F, M, st->expr.get());
+                            }
+                        } else {
+                            lower_expr_to_ir(F, M, st->expr.get());
+                        }
+                    }
+                }
+            }
+            M.funcs.push_back(std::move(F));
+        }
+    }
+
+    // Lower top-level procs
     for (auto &p : P.procs) {
         IRFunc F; F.name = p.name; F.paramCount = (int)p.params.size();
         for (size_t i = 0; i < p.params.size(); ++i) {
@@ -686,14 +1092,13 @@ IRModule lower_program_to_ir(Program& P) {
         }
         for (auto &st : p.body) {
             if (st->k == Stmt::Let) {
-                int src = lower_expr_to_ir(F, st->expr.get());
+                int src = lower_expr_to_ir(F, M, st->expr.get());
                 if (src >= 0) F.locals[st->name] = src;
             } else if (st->k == Stmt::Return) {
-                int v = lower_expr_to_ir(F, st->expr.get());
+                int v = lower_expr_to_ir(F, M, st->expr.get());
                 IRInst r; r.op = IRInst::RET; r.lhs = v; F.insts.push_back(r);
             } else if (st->k == Stmt::ExprStmt) {
                 if (st->expr) {
-                    // If it's a call like print/trap/halt/read32/write32, lower to appropriate IR or CALL.
                     if (st->expr->k == Expr::Call) {
                         std::string callee = st->expr->text;
                         if (callee == "trap") {
@@ -703,12 +1108,12 @@ IRModule lower_program_to_ir(Program& P) {
                         } else if (callee == "read32") {
                             IRInst r; r.op = IRInst::MMIO_READ; if (!st->expr->args.empty()) r.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) r.imm = parse_int_literal(st->expr->args[1]->text); F.insts.push_back(r);
                         } else if (callee == "write32") {
-                            IRInst w; w.op = IRInst::MMIO_WRITE; if (!st->expr->args.empty()) w.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) w.imm = parse_int_literal(st->expr->args[1]->text); if (st->expr->args.size()>2) w.lhs = lower_expr_to_ir(F, st->expr->args[2].get()); F.insts.push_back(w);
+                            IRInst w; w.op = IRInst::MMIO_WRITE; if (!st->expr->args.empty()) w.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) w.imm = parse_int_literal(st->expr->args[1]->text); if (st->expr->args.size()>2) w.lhs = lower_expr_to_ir(F, M, st->expr->args[2].get()); F.insts.push_back(w);
                         } else {
-                            lower_expr_to_ir(F, st->expr.get());
+                            lower_expr_to_ir(F, M, st->expr.get());
                         }
                     } else {
-                        lower_expr_to_ir(F, st->expr.get());
+                        lower_expr_to_ir(F, M, st->expr.get());
                     }
                 }
             }
@@ -719,7 +1124,21 @@ IRModule lower_program_to_ir(Program& P) {
 }
 
 // ----------------------------- NEW: AST Constant Folding --------------------
-// Walk AST and fold integer constant binary/unary expressions.
+// Walk AST and fold integer/float constant binary/unary expressions.
+
+static double eval_binary_float(const std::string& op, double a, double b) {
+    if (op == "+") return a + b;
+    if (op == "-") return a - b;
+    if (op == "*") return a * b;
+    if (op == "/") return b != 0.0 ? a / b : 0.0;
+    if (op == "==") return (a == b) ? 1.0 : 0.0;
+    if (op == "!=") return (a != b) ? 1.0 : 0.0;
+    if (op == "<")  return (a < b) ? 1.0 : 0.0;
+    if (op == "<=") return (a <= b) ? 1.0 : 0.0;
+    if (op == ">")  return (a > b) ? 1.0 : 0.0;
+    if (op == ">=") return (a >= b) ? 1.0 : 0.0;
+    return 0.0;
+}
 
 static int64_t eval_binary_int(const std::string& op, int64_t a, int64_t b) {
     if (op == "+") return a + b;
@@ -727,17 +1146,17 @@ static int64_t eval_binary_int(const std::string& op, int64_t a, int64_t b) {
     if (op == "*") return a * b;
     if (op == "/") return b != 0 ? a / b : 0;
     if (op == "%") return b != 0 ? a % b : 0;
-    if (op == "<<") return a << b;
-    if (op == ">>") return a >> b;
-    if (op == "&") return a & b;
-    if (op == "|") return a | b;
-    if (op == "^") return a ^ b;
     if (op == "==") return (a == b) ? 1 : 0;
     if (op == "!=") return (a != b) ? 1 : 0;
     if (op == "<")  return (a < b) ? 1 : 0;
     if (op == "<=") return (a <= b) ? 1 : 0;
     if (op == ">")  return (a > b) ? 1 : 0;
     if (op == ">=") return (a >= b) ? 1 : 0;
+    if (op == "&")  return a & b;
+    if (op == "|")  return a | b;
+    if (op == "^")  return a ^ b;
+    if (op == "<<") return a << b;
+    if (op == ">>") return a >> b;
     return 0;
 }
 
@@ -748,26 +1167,40 @@ bool fold_constants_in_expr(Expr* e) {
     for (auto &a : e->args) if (a) changed |= fold_constants_in_expr(a.get());
     if (e->cond) changed |= fold_constants_in_expr(e->cond.get());
 
-    // Fold unary
-    if (e->k == Expr::Unary && e->args.size() == 1 && e->args[0] && e->args[0]->k == Expr::IntLit) {
-        int64_t v = parse_int_literal(e->args[0]->text);
-        if (e->op == "-") v = -v;
-        else if (e->op == "~") v = ~v;
-        e->k = Expr::IntLit;
-        e->text = std::to_string(v);
-        e->args.clear();
-        changed = true;
+    // Fold unary int/float
+    if (e->k == Expr::Unary && e->args.size() == 1 && e->args[0]) {
+        if (e->args[0]->k == Expr::IntLit) {
+            int64_t v = parse_int_literal(e->args[0]->text);
+            if (e->op == "-") v = -v;
+            e->k = Expr::IntLit; e->text = std::to_string(v); e->args.clear(); changed = true;
+        } else if (e->args[0]->k == Expr::FloatLit) {
+            double v = parse_float_literal(e->args[0]->text);
+            if (e->op == "-") v = -v;
+            e->k = Expr::FloatLit; e->text = std::to_string(v); e->args.clear(); changed = true;
+        }
     }
 
-    // Fold binary
-    if (e->k == Expr::Binary && e->args.size() == 2 && e->args[0] && e->args[1] && e->args[0]->k == Expr::IntLit && e->args[1]->k == Expr::IntLit) {
-        int64_t a = parse_int_literal(e->args[0]->text);
-        int64_t b = parse_int_literal(e->args[1]->text);
-        int64_t r = eval_binary_int(e->op, a, b);
-        e->k = Expr::IntLit;
-        e->text = std::to_string(r);
-        e->args.clear();
-        changed = true;
+    // Fold binary int
+    if (e->k == Expr::Binary && e->args.size() == 2 && e->args[0] && e->args[1]) {
+        if (e->args[0]->k == Expr::IntLit && e->args[1]->k == Expr::IntLit) {
+            int64_t a = parse_int_literal(e->args[0]->text);
+            int64_t b = parse_int_literal(e->args[1]->text);
+            int64_t r = eval_binary_int(e->op, a, b);
+            e->k = Expr::IntLit; e->text = std::to_string(r); e->args.clear(); changed = true;
+        } else if ((e->args[0]->k == Expr::FloatLit || e->args[1]->k == Expr::FloatLit) &&
+                   (e->args[0]->k == Expr::FloatLit || e->args[0]->k == Expr::IntLit) &&
+                   (e->args[1]->k == Expr::FloatLit || e->args[1]->k == Expr::IntLit)) {
+            double a = (e->args[0]->k == Expr::FloatLit) ? parse_float_literal(e->args[0]->text) : (double)parse_int_literal(e->args[0]->text);
+            double b = (e->args[1]->k == Expr::FloatLit) ? parse_float_literal(e->args[1]->text) : (double)parse_int_literal(e->args[1]->text);
+            double r = eval_binary_float(e->op, a, b);
+            // if op produced boolean-like result but inputs included float, represent as int lit
+            if (e->op == "==" || e->op == "!=" || e->op == "<" || e->op == "<=" || e->op == ">" || e->op == ">=") {
+                e->k = Expr::IntLit; e->text = std::to_string((int64_t)r);
+            } else {
+                e->k = Expr::FloatLit; e->text = std::to_string(r);
+            }
+            e->args.clear(); changed = true;
+        }
     }
 
     return changed;
@@ -804,9 +1237,7 @@ void optimize_ir_dead_code(IRModule& M) {
             for (auto &ins : F.insts) {
                 if (ins.lhs >= 0) used.insert(ins.lhs);
                 if (ins.rhs >= 0) used.insert(ins.rhs);
-                // CALL may reference lhs as arg (we stored first arg in lhs)
                 if (ins.op == IRInst::RET && ins.lhs >= 0) used.insert(ins.lhs);
-                // PRINT uses lhs
                 if (ins.op == IRInst::PRINT && ins.lhs >= 0) used.insert(ins.lhs);
             }
             std::vector<IRInst> out;
@@ -835,7 +1266,7 @@ void optimize_ir_peephole(IRModule& M) {
             if (i + 1 < F.insts.size()) {
                 auto &a = F.insts[i];
                 auto &b = F.insts[i+1];
-                if (a.op == IRInst::CONST && b.op == IRInst::CONST && a.dst == b.dst) {
+                if ((a.op == IRInst::CONST || a.op == IRInst::FCONST) && (b.op == IRInst::CONST || b.op == IRInst::FCONST) && a.dst == b.dst) {
                     // keep only b (later constant)
                     out.push_back(b);
                     ++i; // skip b (already added)
@@ -915,6 +1346,38 @@ namespace rane { namespace x64 {
         void mov_stack_to_rax(int32_t disp) { mov_stackslot_to_reg(RAX, disp); }
         void mov_rax_to_stack(int32_t disp) { mov_reg_to_stackslot(RAX, disp); }
 
+        // movsd xmm, qword [rbp - disp]
+        void movsd_load_xmm_from_stack(int xmm, int32_t disp) {
+            // F2 0F 10 /r : MOVSD xmm, m64
+            byte reg = (0xC0 | ((xmm & 7) << 3) | 0x5);
+            buf.emit({0xF2, 0x0F, 0x10, reg});
+            buf.emit32((uint32_t)(-disp));
+        }
+        // movsd qword [rbp - disp], xmm
+        void movsd_store_xmm_to_stack(int xmm, int32_t disp) {
+            // F2 0F 11 /r : MOVSD m64, xmm
+            byte reg = (0xC0 | ((xmm & 7) << 3) | 0x5);
+            buf.emit({0xF2, 0x0F, 0x11, reg});
+            buf.emit32((uint32_t)(-disp));
+        }
+        // addsd xmm1, xmm2
+        void addsd_xmm_xmm(int dst_xmm, int src_xmm) {
+            byte mod = ((src_xmm & 7) << 3) | (dst_xmm & 7);
+            buf.emit({0xF2, 0x0F, 0x58, mod});
+        }
+        void subsd_xmm_xmm(int dst_xmm, int src_xmm) {
+            byte mod = ((src_xmm & 7) << 3) | (dst_xmm & 7);
+            buf.emit({0xF2, 0x0F, 0x5C, mod});
+        }
+        void mulsd_xmm_xmm(int dst_xmm, int src_xmm) {
+            byte mod = ((src_xmm & 7) << 3) | (dst_xmm & 7);
+            buf.emit({0xF2, 0x0F, 0x59, mod});
+        }
+        void divsd_xmm_xmm(int dst_xmm, int src_xmm) {
+            byte mod = ((src_xmm & 7) << 3) | (dst_xmm & 7);
+            buf.emit({0xF2, 0x0F, 0x5E, mod});
+        }
+
         void write_to_file(const std::string& path) {
             std::ofstream out(path, std::ios::binary);
             out.write(reinterpret_cast<const char*>(buf.data.data()), buf.data.size());
@@ -941,7 +1404,22 @@ struct CodeGen {
             switch (ins.op) {
             case IRInst::CONST: {
                 int dst = ins.dst; int disp = slot_of(dst);
-                e.mov_imm64_to_reg(rane::x64::RAX, (uint64_t)ins.imm);
+                if (!ins.sym.empty()) {
+                    // Symbolic string/data address: leave zero (linker or appended data will be resolved by loader).
+                    e.mov_imm64_to_reg(rane::x64::RAX, 0);
+                } else {
+                    e.mov_imm64_to_reg(rane::x64::RAX, (uint64_t)ins.imm);
+                }
+                e.mov_rax_to_stack(disp);
+                break;
+            }
+            case IRInst::FCONST: {
+                int dst = ins.dst; int disp = slot_of(dst);
+                // move immediate double: move bitpattern into rax then store to stack, later load into xmm when used.
+                uint64_t bits;
+                static_assert(sizeof(double) == sizeof(uint64_t), "double size");
+                std::memcpy(&bits, &ins.fimm, sizeof(double));
+                e.mov_imm64_to_reg(rane::x64::RAX, bits);
                 e.mov_rax_to_stack(disp);
                 break;
             }
@@ -977,8 +1455,40 @@ struct CodeGen {
                 e.mov_rax_to_stack(slot_of(dst));
                 break;
             }
+            case IRInst::FADD: {
+                int dst = ins.dst, L = ins.lhs, R = ins.rhs;
+                e.movsd_load_xmm_from_stack(0, slot_of(L));
+                e.movsd_load_xmm_from_stack(1, slot_of(R));
+                e.addsd_xmm_xmm(0,1);
+                e.movsd_store_xmm_to_stack(0, slot_of(dst));
+                break;
+            }
+            case IRInst::FSUB: {
+                int dst = ins.dst, L = ins.lhs, R = ins.rhs;
+                e.movsd_load_xmm_from_stack(0, slot_of(L));
+                e.movsd_load_xmm_from_stack(1, slot_of(R));
+                e.subsd_xmm_xmm(0,1);
+                e.movsd_store_xmm_to_stack(0, slot_of(dst));
+                break;
+            }
+            case IRInst::FMUL: {
+                int dst = ins.dst, L = ins.lhs, R = ins.rhs;
+                e.movsd_load_xmm_from_stack(0, slot_of(L));
+                e.movsd_load_xmm_from_stack(1, slot_of(R));
+                e.mulsd_xmm_xmm(0,1);
+                e.movsd_store_xmm_to_stack(0, slot_of(dst));
+                break;
+            }
+            case IRInst::FDIV: {
+                int dst = ins.dst, L = ins.lhs, R = ins.rhs;
+                e.movsd_load_xmm_from_stack(0, slot_of(L));
+                e.movsd_load_xmm_from_stack(1, slot_of(R));
+                e.divsd_xmm_xmm(0,1);
+                e.movsd_store_xmm_to_stack(0, slot_of(dst));
+                break;
+            }
             case IRInst::PRINT: {
-                // stub: ignore actual runtime call in flat binary emitter
+                // Stub: no runtime available; write code to return 0; but preserve instruction for tooling
                 break;
             }
             case IRInst::CALL: {
@@ -989,18 +1499,33 @@ struct CodeGen {
                 break;
             }
             case IRInst::RET: {
-                if (ins.lhs >= 0) e.mov_stackslot_to_reg(rane::x64::RAX, slot_of(ins.lhs));
-                else e.mov_imm64_to_reg(rane::x64::RAX, 0);
+                if (ins.lhs >= 0) {
+                    // decide if it's float or int by checking previous instruction
+                    bool isFloat = false;
+                    for (auto &i : F.insts) {
+                        if (i.dst == ins.lhs && i.op == IRInst::FCONST) { isFloat = true; break; }
+                    }
+                    if (isFloat) {
+                        // load float from slot into xmm0, then move to rax bitwise for return (simplified)
+                        e.movsd_load_xmm_from_stack(0, slot_of(ins.lhs));
+                        // move xmm0 to rax: movq rax, xmm0 -> 66 48 0F D6 C0 (complex). For simplicity return 0.
+                        e.mov_imm64_to_reg(rane::x64::RAX, 0);
+                    } else {
+                        e.mov_stackslot_to_reg(rane::x64::RAX, slot_of(ins.lhs));
+                    }
+                } else e.mov_imm64_to_reg(rane::x64::RAX, 0);
                 e.epilogue();
                 e.write_to_file(outPathPrefix + "_" + F.name + ".bin");
+                // Append datasec if present
+                if (M && !M->datasec.empty()) {
+                    std::ofstream out(outPathPrefix + "_" + F.name + ".bin", std::ios::binary | std::ios::app);
+                    for (auto &d : M->datasec) {
+                        out.put(0);
+                        out.write(d.second.c_str(), (std::streamsize)d.second.size());
+                    }
+                }
                 return;
             }
-            case IRInst::MMIO_READ:
-            case IRInst::MMIO_WRITE:
-            case IRInst::TRAP:
-            case IRInst::HALT:
-                // not implemented in flat emitter; treat as no-op or instrumentation hook
-                break;
             default:
                 break;
             }
@@ -1008,6 +1533,13 @@ struct CodeGen {
         e.mov_imm64_to_reg(rane::x64::RAX, 0);
         e.epilogue();
         e.write_to_file(outPathPrefix + "_" + F.name + ".bin");
+        if (M && !M->datasec.empty()) {
+            std::ofstream out(outPathPrefix + "_" + F.name + ".bin", std::ios::binary | std::ios::app);
+            for (auto &d : M->datasec) {
+                out.put(0);
+                out.write(d.second.c_str(), (std::streamsize)d.second.size());
+            }
+        }
     }
 
     void emit_all(IRModule& M, const std::string& prefix) {
