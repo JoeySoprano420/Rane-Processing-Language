@@ -274,14 +274,33 @@ struct Stmt;
 using ExprPtr = std::unique_ptr<Expr>;
 using StmtPtr = std::unique_ptr<Stmt>;
 
+// Pattern support for match/case
+struct Pattern {
+    enum Kind { Wild, Ident, Int, Tuple, Constructor } k = Wild;
+    std::string text; // identifier or int text or constructor name
+    std::vector<Pattern> parts;
+};
+
+// Match case
+struct MatchCase {
+    Pattern pat;
+    ExprPtr expr;
+};
+
 struct Expr {
     enum Kind { IntLit, FloatLit, StrLit, BoolLit, NullLit, Ident, HashIdent, Unary, Binary, Call, Ternary,
-                ArrayLit, Field, Index, StructLit } k;
+                ArrayLit, Field, Index, StructLit, Lambda, Match } k;
     std::string text; // literal text, ident name, or field name
     std::string op; // operator for unary/binary
     std::vector<ExprPtr> args; // call args, binary children, array elements, index operands
     ExprPtr cond; // optional for ternary
 
+    // Lambda specifics
+    std::vector<std::string> lambda_params;
+    std::vector<StmtPtr> lambda_body;
+
+    // Match specifics
+    std::vector<MatchCase> match_cases;
     Expr() = default;
 };
 
@@ -352,6 +371,47 @@ struct Parser {
         return name;
     }
 
+    // Pattern parsing (simple)
+    Pattern parse_pattern() {
+        Pattern pat;
+        if (cur().kind == TokKind::Ident) {
+            std::string id = cur().lexeme; ++p;
+            if (id == "_") { pat.k = Pattern::Wild; pat.text = "_"; return pat; }
+            // constructor-like or binding
+            if (accept_sym("(")) {
+                pat.k = Pattern::Constructor;
+                pat.text = id;
+                // parse subpatterns
+                if (!accept_sym(")")) {
+                    for (;;) {
+                        pat.parts.push_back(parse_pattern());
+                        if (accept_sym(")")) break;
+                        expect_sym(",");
+                    }
+                }
+                return pat;
+            } else {
+                // plain identifier binding
+                pat.k = Pattern::Ident; pat.text = id; return pat;
+            }
+        } else if (cur().kind == TokKind::Number) {
+            pat.k = Pattern::Int; pat.text = cur().lexeme; ++p; return pat;
+        } else if (accept_sym("(")) {
+            pat.k = Pattern::Tuple;
+            if (!accept_sym(")")) {
+                for (;;) {
+                    pat.parts.push_back(parse_pattern());
+                    if (accept_sym(")")) break;
+                    expect_sym(",");
+                }
+            }
+            return pat;
+        } else {
+            // fallback wildcard
+            pat.k = Pattern::Wild; pat.text = "_"; return pat;
+        }
+    }
+
     ExprPtr parse_primary() {
         // Numbers, strings, bool, null, hash-ident handled as before
         if (cur().kind == TokKind::Number) {
@@ -373,6 +433,71 @@ struct Parser {
         }
         if (cur().kind == TokKind::HashIdent) {
             auto e = std::make_unique<Expr>(); e->k = Expr::HashIdent; e->text = cur().lexeme; ++p; return e;
+        }
+
+        // Lambda: 'lambda (params) { ... }' or 'lambda (params) => expr'
+        if (cur().kind == TokKind::Kw && cur().lexeme == "lambda") {
+            ++p;
+            auto e = std::make_unique<Expr>(); e->k = Expr::Lambda;
+            expect_sym("(");
+            if (!accept_sym(")")) {
+                for (;;) {
+                    if (cur().kind != TokKind::Ident) throw std::runtime_error("expected param name in lambda");
+                    e->lambda_params.push_back(cur().lexeme); ++p;
+                    if (accept_sym(")")) break;
+                    expect_sym(",");
+                }
+            }
+            if (accept_sym("{")) {
+                while (!(cur().kind == TokKind::Sym && cur().lexeme == "}")) {
+                    e->lambda_body.push_back(parse_stmt());
+                }
+                expect_sym("}");
+            } else if (accept_sym("=>")) {
+                // single-expression lambda body, wrap in return
+                StmtPtr s = std::make_unique<Stmt>(); s->k = Stmt::Return;
+                s->expr = parse_expr();
+                e->lambda_body.push_back(std::move(s));
+            } else {
+                throw std::runtime_error("expected '{' or '=>' after lambda parameter list");
+            }
+            return e;
+        }
+
+        // Match: 'match expr { case pat => expr ; ... }'
+        if (cur().kind == TokKind::Kw && cur().lexeme == "match") {
+            ++p;
+            auto e = std::make_unique<Expr>(); e->k = Expr::Match;
+            // subject expression
+            e->args.push_back(parse_expr());
+            expect_sym("{");
+            while (!(cur().kind == TokKind::Sym && cur().lexeme == "}")) {
+                // accept 'case' or 'default'
+                if (cur().kind == TokKind::Kw && cur().lexeme == "case") {
+                    ++p;
+                    MatchCase mc;
+                    mc.pat = parse_pattern();
+                    expect_sym("=>");
+                    mc.expr = parse_expr();
+                    accept(TokKind::Sym, ";");
+                    e->match_cases.push_back(std::move(mc));
+                    continue;
+                } else if (cur().kind == TokKind::Kw && cur().lexeme == "default") {
+                    ++p;
+                    MatchCase mc;
+                    mc.pat.k = Pattern::Wild;
+                    expect_sym("=>");
+                    mc.expr = parse_expr();
+                    accept(TokKind::Sym, ";");
+                    e->match_cases.push_back(std::move(mc));
+                    continue;
+                } else {
+                    // skip unexpected tokens to remain robust
+                    ++p;
+                }
+            }
+            expect_sym("}");
+            return e;
         }
 
         // Array literal [ ... ]
@@ -877,7 +1002,8 @@ void typecheck_program(Program& prog, RuleDB& /*rules*/) {
 // ----------------------------- Handwritten IR --------------------------------
 
 struct IRInst {
-    enum Op { NOP, CONST, FCONST, ADD, SUB, MUL, DIV, FADD, FSUB, FMUL, FDIV, CALL, RET, PRINT, MMIO_READ, MMIO_WRITE, TRAP, HALT } op = NOP;
+    enum Op { NOP, CONST, FCONST, ADD, SUB, MUL, DIV, FADD, FSUB, FMUL, FDIV, CALL, RET, PRINT, MMIO_READ, MMIO_WRITE, TRAP, HALT,
+              ALLOC, FREE, CLOSURE, MATCH } op = NOP;
     int dst = -1;
     int lhs = -1;
     int rhs = -1;
@@ -911,6 +1037,37 @@ struct IRModule {
 
 // -------------------------- Lowering AST -> IR ------------------------------
 
+// helpers for cloning AST fragments (lambda lowering creates new IRFunc without mutating original AST)
+static ExprPtr clone_expr(const Expr* e);
+static StmtPtr clone_stmt(const Stmt* s);
+
+static ExprPtr clone_expr(const Expr* e) {
+    if (!e) return nullptr;
+    auto r = std::make_unique<Expr>();
+    r->k = e->k;
+    r->text = e->text;
+    r->op = e->op;
+    for (auto &a : e->args) r->args.push_back(clone_expr(a.get()));
+    if (e->cond) r->cond = clone_expr(e->cond.get());
+    r->lambda_params = e->lambda_params;
+    for (auto &st : e->lambda_body) r->lambda_body.push_back(clone_stmt(st.get()));
+    for (auto &mc : e->match_cases) {
+        MatchCase mcc;
+        mcc.pat = mc.pat;
+        mcc.expr = clone_expr(mc.expr.get());
+        r->match_cases.push_back(std::move(mcc));
+    }
+    return r;
+}
+static StmtPtr clone_stmt(const Stmt* s) {
+    if (!s) return nullptr;
+    auto r = std::make_unique<Stmt>();
+    r->k = s->k;
+    r->name = s->name;
+    r->expr = clone_expr(s->expr.get());
+    return r;
+}
+
 static int parse_int_literal(const std::string& s) {
     std::string t; for (char c: s) if (c != '_') t.push_back(c);
     try {
@@ -924,6 +1081,27 @@ static double parse_float_literal(const std::string& s) {
     std::string t; for (char c: s) if (c != '_') t.push_back(c);
     try { return std::stod(t); } catch(...) { return 0.0; }
 }
+
+// Collect identifiers (simple) used in an expression (used to detect captures)
+static void collect_idents_in_expr(const Expr* e, std::set<std::string>& out) {
+    if (!e) return;
+    if (e->k == Expr::Ident) out.insert(e->text);
+    for (auto &a : e->args) collect_idents_in_expr(a.get(), out);
+    if (e->cond) collect_idents_in_expr(e->cond.get(), out);
+    for (auto &st : e->lambda_body) {
+        if (st && st->expr) collect_idents_in_expr(st->expr.get(), out);
+    }
+    for (auto &mc : e->match_cases) {
+        if (mc.expr) collect_idents_in_expr(mc.expr.get(), out);
+    }
+}
+
+// we need an anon function counter for lambdas
+static int g_anon_func_counter = 0;
+
+// Forward declaration of lowering helpers
+int lower_expr_to_ir(IRFunc& F, IRModule& M, Expr* e);
+void lower_proc_into_ir(IRFunc& F, IRModule& M, const Proc& p);
 
 int lower_expr_to_ir(IRFunc& F, IRModule& M, Expr* e) {
     if (!e) return -1;
@@ -986,7 +1164,22 @@ int lower_expr_to_ir(IRFunc& F, IRModule& M, Expr* e) {
         return ret;
     }
     case Expr::Call: {
-        // builtin print accepts strings and numbers; lower as CALL to runtime stub
+        // heap allocation and free builtins: implement with ALLOC/FREE ops
+        if (e->text == "allocate" || e->text == "allocate_mem" || e->text == "allocate_heap") {
+            int sizeArg = -1;
+            if (!e->args.empty()) sizeArg = lower_expr_to_ir(F, M, e->args[0].get());
+            int dst = F.alloc_temp();
+            IRInst a; a.op = IRInst::ALLOC; a.dst = dst; a.lhs = sizeArg; F.insts.push_back(a);
+            return dst;
+        }
+        if (e->text == "free") {
+            int ptrArg = -1;
+            if (!e->args.empty()) ptrArg = lower_expr_to_ir(F, M, e->args[0].get());
+            IRInst fr; fr.op = IRInst::FREE; fr.lhs = ptrArg; F.insts.push_back(fr);
+            return -1;
+        }
+
+        // builtin print accepts strings and numbers; lower as PRINT to runtime stub
         if (e->text == "print") {
             int argt = -1;
             if (!e->args.empty()) argt = lower_expr_to_ir(F, M, e->args[0].get());
@@ -1036,11 +1229,127 @@ int lower_expr_to_ir(IRFunc& F, IRModule& M, Expr* e) {
         F.insts.push_back(ins);
         return dst;
     }
+    case Expr::Lambda: {
+        // Lower lambda by creating a new IRFunc in module M, capturing free vars and producing a closure object.
+        std::set<std::string> used;
+        // collect idents from lambda body
+        for (auto &st : e->lambda_body) if (st && st->expr) collect_idents_in_expr(st->expr.get(), used);
+        // exclude parameters (they are local to lambda)
+        for (auto &pn : e->lambda_params) used.erase(pn);
+        // Now `used` contains candidate captured names
+        std::vector<std::string> captures(used.begin(), used.end());
+
+        std::string fname = ".anon" + std::to_string(g_anon_func_counter++);
+        IRFunc lambdaF; lambdaF.name = fname;
+        // lambda function parameters: first captured names, then lambda params
+        lambdaF.paramCount = (int)(captures.size() + e->lambda_params.size());
+        // create locals for captures and params
+        for (auto &cap : captures) {
+            int t = lambdaF.alloc_temp();
+            lambdaF.locals[cap] = t;
+        }
+        for (auto &pname : e->lambda_params) {
+            int t = lambdaF.alloc_temp();
+            lambdaF.locals[pname] = t;
+        }
+        // Lower the lambda body into lambdaF (clone to avoid mutating original AST)
+        for (auto &st : e->lambda_body) {
+            if (!st) continue;
+            if (st->k == Stmt::Let) {
+                int src = -1;
+                if (st->expr) src = lower_expr_to_ir(lambdaF, M, clone_expr(st->expr.get()).get());
+                if (src >= 0) lambdaF.locals[st->name] = src;
+            } else if (st->k == Stmt::Return) {
+                int v = -1;
+                if (st->expr) v = lower_expr_to_ir(lambdaF, M, clone_expr(st->expr.get()).get());
+                IRInst r; r.op = IRInst::RET; r.lhs = v; lambdaF.insts.push_back(r);
+            } else if (st->k == Stmt::ExprStmt) {
+                if (st->expr) lower_expr_to_ir(lambdaF, M, clone_expr(st->expr.get()).get());
+            }
+        }
+        // If lambda didn't end with RET, add a default RET 0
+        if (lambdaF.insts.empty() || lambdaF.insts.back().op != IRInst::RET) {
+            IRInst r; r.op = IRInst::RET; r.lhs = -1; lambdaF.insts.push_back(r);
+        }
+        // add lambdaF to module
+        M.funcs.push_back(std::move(lambdaF));
+
+        // In the parent function F, build closure creation instruction
+        std::vector<int> capTemps;
+        for (auto &capName : captures) {
+            auto it = F.locals.find(capName);
+            if (it != F.locals.end()) capTemps.push_back(it->second);
+            else {
+                // if not present in parent, create a zero temp
+                int t = F.alloc_temp();
+                IRInst i; i.op = IRInst::CONST; i.dst = t; i.imm = 0;
+                F.insts.push_back(i);
+                F.locals[capName] = t;
+                capTemps.push_back(t);
+            }
+        }
+        int closureTemp = F.alloc_temp();
+        IRInst ci; ci.op = IRInst::CLOSURE; ci.dst = closureTemp; ci.sym = fname;
+        ci.lhs = (capTemps.size() ? capTemps[0] : -1);
+        for (size_t i = 1; i < capTemps.size(); ++i) ci.imm ^= (int64_t)capTemps[i] + (int64_t)(i * 7919);
+        F.insts.push_back(ci);
+        return closureTemp;
+    }
+    case Expr::Match: {
+        // Lower match conservatively to a MATCH IR call that returns result of match.
+        int subj = -1;
+        if (!e->args.empty()) subj = lower_expr_to_ir(F, M, e->args[0].get());
+        int dst = F.alloc_temp();
+        IRInst mi; mi.op = IRInst::MATCH; mi.dst = dst; mi.lhs = subj;
+        // pack simple info about cases into imm (not used here); ensures uniqueness
+        for (size_t i = 0; i < e->match_cases.size(); ++i) {
+            const auto &mc = e->match_cases[i];
+            if (mc.pat.k == Pattern::Int) mi.imm ^= (int64_t)parse_int_literal(mc.pat.text) + (int64_t)(i*1315423911);
+            else mi.imm ^= (int64_t)(i+1) * 2654435761LL;
+        }
+        F.insts.push_back(mi);
+        return dst;
+    }
     default:
         return -1;
     }
 }
 
+void lower_proc_into_ir(IRFunc& F, IRModule& M, const Proc& p) {
+    // already set up param locals by the caller
+    for (auto &st : p.body) {
+        if (st->k == Stmt::Let) {
+            int src = -1;
+            if (st->expr) src = lower_expr_to_ir(F, M, st->expr.get());
+            if (src >= 0) F.locals[st->name] = src;
+        } else if (st->k == Stmt::Return) {
+            int v = -1;
+            if (st->expr) v = lower_expr_to_ir(F, M, st->expr.get());
+            IRInst r; r.op = IRInst::RET; r.lhs = v; F.insts.push_back(r);
+        } else if (st->k == Stmt::ExprStmt) {
+            if (st->expr) {
+                if (st->expr->k == Expr::Call) {
+                    std::string callee = st->expr->text;
+                    if (callee == "trap") {
+                        IRInst t; t.op = IRInst::TRAP; if (!st->expr->args.empty() && st->expr->args[0]) t.imm = parse_int_literal(st->expr->args[0]->text); F.insts.push_back(t);
+                    } else if (callee == "halt") {
+                        IRInst h; h.op = IRInst::HALT; F.insts.push_back(h);
+                    } else if (callee == "read32") {
+                        IRInst r; r.op = IRInst::MMIO_READ; if (!st->expr->args.empty()) r.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) r.imm = parse_int_literal(st->expr->args[1]->text); F.insts.push_back(r);
+                    } else if (callee == "write32") {
+                        IRInst w; w.op = IRInst::MMIO_WRITE; if (!st->expr->args.empty()) w.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) w.imm = parse_int_literal(st->expr->args[1]->text); if (st->expr->args.size()>2) w.lhs = lower_expr_to_ir(F, M, st->expr->args[2].get()); F.insts.push_back(w);
+                    } else {
+                        lower_expr_to_ir(F, M, st->expr.get());
+                    }
+                } else {
+                    lower_expr_to_ir(F, M, st->expr.get());
+                }
+            }
+        }
+    }
+}
+
+// Lower entire program into IR
 IRModule lower_program_to_ir(Program& P) {
     IRModule M;
     // Lower module-level procs as separate functions with module::prefix in name
@@ -1051,33 +1360,10 @@ IRModule lower_program_to_ir(Program& P) {
                 int t = F.alloc_temp();
                 F.locals[p.params[i]] = t;
             }
-            for (auto &st : p.body) {
-                if (st->k == Stmt::Let) {
-                    int src = lower_expr_to_ir(F, M, st->expr.get());
-                    if (src >= 0) F.locals[st->name] = src;
-                } else if (st->k == Stmt::Return) {
-                    int v = lower_expr_to_ir(F, M, st->expr.get());
-                    IRInst r; r.op = IRInst::RET; r.lhs = v; F.insts.push_back(r);
-                } else if (st->k == Stmt::ExprStmt) {
-                    if (st->expr) {
-                        if (st->expr->k == Expr::Call) {
-                            std::string callee = st->expr->text;
-                            if (callee == "trap") {
-                                IRInst t; t.op = IRInst::TRAP; if (!st->expr->args.empty() && st->expr->args[0]) t.imm = parse_int_literal(st->expr->args[0]->text); F.insts.push_back(t);
-                            } else if (callee == "halt") {
-                                IRInst h; h.op = IRInst::HALT; F.insts.push_back(h);
-                            } else if (callee == "read32") {
-                                IRInst r; r.op = IRInst::MMIO_READ; if (!st->expr->args.empty()) r.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) r.imm = parse_int_literal(st->expr->args[1]->text); F.insts.push_back(r);
-                            } else if (callee == "write32") {
-                                IRInst w; w.op = IRInst::MMIO_WRITE; if (!st->expr->args.empty()) w.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) w.imm = parse_int_literal(st->expr->args[1]->text); if (st->expr->args.size()>2) w.lhs = lower_expr_to_ir(F, M, st->expr->args[2].get()); F.insts.push_back(w);
-                            } else {
-                                lower_expr_to_ir(F, M, st->expr.get());
-                            }
-                        } else {
-                            lower_expr_to_ir(F, M, st->expr.get());
-                        }
-                    }
-                }
+            lower_proc_into_ir(F, M, p);
+            // ensure function ends with RET
+            if (F.insts.empty() || F.insts.back().op != IRInst::RET) {
+                IRInst r; r.op = IRInst::RET; r.lhs = -1; F.insts.push_back(r);
             }
             M.funcs.push_back(std::move(F));
         }
@@ -1090,33 +1376,9 @@ IRModule lower_program_to_ir(Program& P) {
             int t = F.alloc_temp();
             F.locals[p.params[i]] = t;
         }
-        for (auto &st : p.body) {
-            if (st->k == Stmt::Let) {
-                int src = lower_expr_to_ir(F, M, st->expr.get());
-                if (src >= 0) F.locals[st->name] = src;
-            } else if (st->k == Stmt::Return) {
-                int v = lower_expr_to_ir(F, M, st->expr.get());
-                IRInst r; r.op = IRInst::RET; r.lhs = v; F.insts.push_back(r);
-            } else if (st->k == Stmt::ExprStmt) {
-                if (st->expr) {
-                    if (st->expr->k == Expr::Call) {
-                        std::string callee = st->expr->text;
-                        if (callee == "trap") {
-                            IRInst t; t.op = IRInst::TRAP; if (!st->expr->args.empty() && st->expr->args[0]) t.imm = parse_int_literal(st->expr->args[0]->text); F.insts.push_back(t);
-                        } else if (callee == "halt") {
-                            IRInst h; h.op = IRInst::HALT; F.insts.push_back(h);
-                        } else if (callee == "read32") {
-                            IRInst r; r.op = IRInst::MMIO_READ; if (!st->expr->args.empty()) r.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) r.imm = parse_int_literal(st->expr->args[1]->text); F.insts.push_back(r);
-                        } else if (callee == "write32") {
-                            IRInst w; w.op = IRInst::MMIO_WRITE; if (!st->expr->args.empty()) w.sym = st->expr->args[0]->text; if (st->expr->args.size()>1) w.imm = parse_int_literal(st->expr->args[1]->text); if (st->expr->args.size()>2) w.lhs = lower_expr_to_ir(F, M, st->expr->args[2].get()); F.insts.push_back(w);
-                        } else {
-                            lower_expr_to_ir(F, M, st->expr.get());
-                        }
-                    } else {
-                        lower_expr_to_ir(F, M, st->expr.get());
-                    }
-                }
-            }
+        lower_proc_into_ir(F, M, p);
+        if (F.insts.empty() || F.insts.back().op != IRInst::RET) {
+            IRInst r; r.op = IRInst::RET; r.lhs = -1; F.insts.push_back(r);
         }
         M.funcs.push_back(std::move(F));
     }
@@ -1166,6 +1428,8 @@ bool fold_constants_in_expr(Expr* e) {
     // Recurse first
     for (auto &a : e->args) if (a) changed |= fold_constants_in_expr(a.get());
     if (e->cond) changed |= fold_constants_in_expr(e->cond.get());
+    for (auto &st : e->lambda_body) if (st && st->expr) changed |= fold_constants_in_expr(st->expr.get());
+    for (auto &mc : e->match_cases) if (mc.expr) changed |= fold_constants_in_expr(mc.expr.get());
 
     // Fold unary int/float
     if (e->k == Expr::Unary && e->args.size() == 1 && e->args[0]) {
@@ -1239,11 +1503,12 @@ void optimize_ir_dead_code(IRModule& M) {
                 if (ins.rhs >= 0) used.insert(ins.rhs);
                 if (ins.op == IRInst::RET && ins.lhs >= 0) used.insert(ins.lhs);
                 if (ins.op == IRInst::PRINT && ins.lhs >= 0) used.insert(ins.lhs);
+                if (ins.op == IRInst::CLOSURE && ins.lhs >= 0) used.insert(ins.lhs);
             }
             std::vector<IRInst> out;
             for (auto &ins : F.insts) {
                 bool defines_temp = (ins.dst >= 0);
-                bool has_side_effect = (ins.op == IRInst::PRINT || ins.op == IRInst::CALL || ins.op == IRInst::MMIO_READ || ins.op == IRInst::MMIO_WRITE || ins.op == IRInst::TRAP || ins.op == IRInst::HALT);
+                bool has_side_effect = (ins.op == IRInst::PRINT || ins.op == IRInst::CALL || ins.op == IRInst::MMIO_READ || ins.op == IRInst::MMIO_WRITE || ins.op == IRInst::TRAP || ins.op == IRInst::HALT || ins.op == IRInst::ALLOC || ins.op == IRInst::FREE || ins.op == IRInst::CLOSURE || ins.op == IRInst::MATCH);
                 if (defines_temp && !has_side_effect && used.count(ins.dst) == 0) {
                     // drop instruction
                     changed = true;
@@ -1485,6 +1750,34 @@ struct CodeGen {
                 e.movsd_load_xmm_from_stack(1, slot_of(R));
                 e.divsd_xmm_xmm(0,1);
                 e.movsd_store_xmm_to_stack(0, slot_of(dst));
+                break;
+            }
+            case IRInst::ALLOC: {
+                // Stub: no runtime malloc here; give zero pointer placeholder
+                if (ins.dst >= 0) {
+                    e.mov_imm64_to_reg(rane::x64::RAX, 0);
+                    e.mov_rax_to_stack(slot_of(ins.dst));
+                }
+                break;
+            }
+            case IRInst::FREE: {
+                // free is a side-effect; no codegen performed here
+                break;
+            }
+            case IRInst::CLOSURE: {
+                // produce opaque closure handle (zero)
+                if (ins.dst >= 0) {
+                    e.mov_imm64_to_reg(rane::x64::RAX, 0);
+                    e.mov_rax_to_stack(slot_of(ins.dst));
+                }
+                break;
+            }
+            case IRInst::MATCH: {
+                // conservative: produce zero result (pattern matching runtime not emitted)
+                if (ins.dst >= 0) {
+                    e.mov_imm64_to_reg(rane::x64::RAX, 0);
+                    e.mov_rax_to_stack(slot_of(ins.dst));
+                }
                 break;
             }
             case IRInst::PRINT: {
