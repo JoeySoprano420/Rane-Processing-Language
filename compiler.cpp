@@ -14,16 +14,20 @@
 #include <cassert>
 #include <cctype>
 #include <cstdint>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <stdexcept>
+#include <algorithm>
 
 static std::string read_file_all(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
@@ -714,6 +718,136 @@ IRModule lower_program_to_ir(Program& P) {
     return M;
 }
 
+// ----------------------------- NEW: AST Constant Folding --------------------
+// Walk AST and fold integer constant binary/unary expressions.
+
+static int64_t eval_binary_int(const std::string& op, int64_t a, int64_t b) {
+    if (op == "+") return a + b;
+    if (op == "-") return a - b;
+    if (op == "*") return a * b;
+    if (op == "/") return b != 0 ? a / b : 0;
+    if (op == "%") return b != 0 ? a % b : 0;
+    if (op == "<<") return a << b;
+    if (op == ">>") return a >> b;
+    if (op == "&") return a & b;
+    if (op == "|") return a | b;
+    if (op == "^") return a ^ b;
+    if (op == "==") return (a == b) ? 1 : 0;
+    if (op == "!=") return (a != b) ? 1 : 0;
+    if (op == "<")  return (a < b) ? 1 : 0;
+    if (op == "<=") return (a <= b) ? 1 : 0;
+    if (op == ">")  return (a > b) ? 1 : 0;
+    if (op == ">=") return (a >= b) ? 1 : 0;
+    return 0;
+}
+
+bool fold_constants_in_expr(Expr* e) {
+    if (!e) return false;
+    bool changed = false;
+    // Recurse first
+    for (auto &a : e->args) if (a) changed |= fold_constants_in_expr(a.get());
+    if (e->cond) changed |= fold_constants_in_expr(e->cond.get());
+
+    // Fold unary
+    if (e->k == Expr::Unary && e->args.size() == 1 && e->args[0] && e->args[0]->k == Expr::IntLit) {
+        int64_t v = parse_int_literal(e->args[0]->text);
+        if (e->op == "-") v = -v;
+        else if (e->op == "~") v = ~v;
+        e->k = Expr::IntLit;
+        e->text = std::to_string(v);
+        e->args.clear();
+        changed = true;
+    }
+
+    // Fold binary
+    if (e->k == Expr::Binary && e->args.size() == 2 && e->args[0] && e->args[1] && e->args[0]->k == Expr::IntLit && e->args[1]->k == Expr::IntLit) {
+        int64_t a = parse_int_literal(e->args[0]->text);
+        int64_t b = parse_int_literal(e->args[1]->text);
+        int64_t r = eval_binary_int(e->op, a, b);
+        e->k = Expr::IntLit;
+        e->text = std::to_string(r);
+        e->args.clear();
+        changed = true;
+    }
+
+    return changed;
+}
+
+bool fold_constants_in_proc(Proc& p) {
+    bool changed = false;
+    for (auto &s : p.body) {
+        if (s && s->expr) changed |= fold_constants_in_expr(s->expr.get());
+    }
+    return changed;
+}
+
+void fold_constants_program(Program& prog) {
+    for (auto &p : prog.procs) {
+        bool any = fold_constants_in_proc(p);
+        if (any) {
+            // optional: repeat to reach fixed point
+            fold_constants_in_proc(p);
+        }
+    }
+}
+
+// ----------------------------- NEW: IR Dead Code Elim ----------------------
+// Remove IR instructions defining temps never used and without side-effects.
+
+void optimize_ir_dead_code(IRModule& M) {
+    for (auto &F : M.funcs) {
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            std::set<int> used;
+            // Scan for uses in operands and for return
+            for (auto &ins : F.insts) {
+                if (ins.lhs >= 0) used.insert(ins.lhs);
+                if (ins.rhs >= 0) used.insert(ins.rhs);
+                // CALL may reference lhs as arg (we stored first arg in lhs)
+                if (ins.op == IRInst::RET && ins.lhs >= 0) used.insert(ins.lhs);
+                // PRINT uses lhs
+                if (ins.op == IRInst::PRINT && ins.lhs >= 0) used.insert(ins.lhs);
+            }
+            std::vector<IRInst> out;
+            for (auto &ins : F.insts) {
+                bool defines_temp = (ins.dst >= 0);
+                bool has_side_effect = (ins.op == IRInst::PRINT || ins.op == IRInst::CALL || ins.op == IRInst::MMIO_READ || ins.op == IRInst::MMIO_WRITE || ins.op == IRInst::TRAP || ins.op == IRInst::HALT);
+                if (defines_temp && !has_side_effect && used.count(ins.dst) == 0) {
+                    // drop instruction
+                    changed = true;
+                    continue;
+                }
+                out.push_back(ins);
+            }
+            F.insts.swap(out);
+        }
+    }
+}
+
+// ----------------------------- NEW: IR Peephole (CONST coalescing) --------
+// Remove immediate CONST followed immediately by another CONST to same temp.
+
+void optimize_ir_peephole(IRModule& M) {
+    for (auto &F : M.funcs) {
+        std::vector<IRInst> out;
+        for (size_t i = 0; i < F.insts.size(); ++i) {
+            if (i + 1 < F.insts.size()) {
+                auto &a = F.insts[i];
+                auto &b = F.insts[i+1];
+                if (a.op == IRInst::CONST && b.op == IRInst::CONST && a.dst == b.dst) {
+                    // keep only b (later constant)
+                    out.push_back(b);
+                    ++i; // skip b (already added)
+                    continue;
+                }
+            }
+            out.push_back(F.insts[i]);
+        }
+        F.insts.swap(out);
+    }
+}
+
 // ----------------------------- x64 Emitter ---------------------------------
 
 namespace rane { namespace x64 {
@@ -877,7 +1011,14 @@ struct CodeGen {
     }
 
     void emit_all(IRModule& M, const std::string& prefix) {
-        for (auto &f : M.funcs) gen_function(f, prefix);
+        // Optionally parallelize per-function emission for speed.
+        std::vector<std::thread> threads;
+        for (auto &f : M.funcs) {
+            threads.emplace_back([this, &f, prefix](){
+                gen_function(const_cast<IRFunc&>(f), prefix);
+            });
+        }
+        for (auto &t : threads) if (t.joinable()) t.join();
     }
 };
 
@@ -886,11 +1027,27 @@ struct CodeGen {
 int main(int argc, char** argv) {
     try {
         if (argc < 3) {
-            std::cerr << "usage: ranecc <syntax.rane> <user.rane>\n";
+            std::cerr << "usage: ranecc <syntax.rane> <user.rane> [--opt-level N] [--out-prefix prefix]\n";
             return 2;
         }
-        std::string syntaxText = read_file_all(argv[1]);
-        std::string userText = read_file_all(argv[2]);
+
+        int opt_level = 2;
+        std::string out_prefix = "rane_output";
+        std::string syntaxPath = argv[1];
+        std::string userPath = argv[2];
+
+        // parse optional args
+        for (int i = 3; i < argc; ++i) {
+            std::string s = argv[i];
+            if (s == "--opt-level" && i + 1 < argc) { opt_level = std::stoi(argv[++i]); }
+            else if (s == "--out-prefix" && i + 1 < argc) { out_prefix = argv[++i]; }
+            else { std::cerr << "unknown arg: " << s << "\n"; }
+        }
+
+        auto t0 = std::chrono::high_resolution_clock::now();
+
+        std::string syntaxText = read_file_all(syntaxPath);
+        std::string userText = read_file_all(userPath);
 
         RuleDB rules;
         rules.seed_comprehensive();
@@ -903,14 +1060,25 @@ int main(int argc, char** argv) {
         Parser parser(toks);
         Program prog = parser.parse_program();
 
+        // AST-level constant folding (opt)
+        if (opt_level > 0) fold_constants_program(prog);
+
         typecheck_program(prog, rules);
 
         IRModule M = lower_program_to_ir(prog);
 
-        CodeGen cg; cg.M = &M;
-        cg.emit_all(M, "rane_output");
+        // IR optimizations
+        if (opt_level >= 1) {
+            optimize_ir_peephole(M);
+            optimize_ir_dead_code(M);
+        }
 
-        std::cerr << "ok: emitted function binaries (rane_output_<proc>.bin)\n";
+        CodeGen cg; cg.M = &M;
+        cg.emit_all(M, out_prefix);
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = t1 - t0;
+        std::cerr << "ok: emitted function binaries (" << out_prefix << "_<proc>.bin) in " << elapsed.count() << "s\n";
         return 0;
     } catch (const std::exception& ex) {
         std::cerr << "fatal: " << ex.what() << "\n";
