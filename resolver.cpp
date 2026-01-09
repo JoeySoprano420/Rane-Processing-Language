@@ -57,6 +57,13 @@ static std::string trim_copy(std::string s) {
     return s.substr(l, r - l + 1);
 }
 
+static std::string sanitize_filename(std::string s) {
+    for (char &c : s) {
+        if (!(std::isalnum((unsigned char)c) || c == '.' || c == '_' || c == '-')) c = '_';
+    }
+    return s;
+}
+
 // ----------------------------- Lexer / Tokens ------------------------------
 
 enum class TokenKind { Eof, Ident, Kw, Number, String, Char, Sym, HashIdent };
@@ -771,7 +778,69 @@ struct EvalContext {
     }
 };
 
-// Translator: converts Proc body into ActionPlan actions (one action per stmt).
+// ----------------------------- Lightweight x86-64 emitter stub ------------
+// Minimal deterministic native-code lowering stub: emits a tiny raw x86-64
+// function that returns a constant in RAX. This is a safe, platform-limited
+// lowering stub (no PE/ELF wrapper) intended to illustrate the pipeline.
+
+namespace x64stub {
+    using byte = uint8_t;
+    struct CodeBuffer {
+        std::vector<byte> data;
+        void emit(byte b) { data.push_back(b); }
+        void emit32(uint32_t x) {
+            for (int i = 0; i < 4; ++i) emit((byte)((x >> (i * 8)) & 0xFF));
+        }
+        void emit64(uint64_t x) {
+            for (int i = 0; i < 8; ++i) emit((byte)((x >> (i * 8)) & 0xFF));
+        }
+        size_t size() const { return data.size(); }
+    };
+
+    static void write_blob_to_file(const std::string& path, const CodeBuffer& buf) {
+        std::ofstream out(path, std::ios::binary);
+        if (!out) throw std::runtime_error("failed to write native stub: " + path);
+        out.write(reinterpret_cast<const char*>(buf.data.data()), (std::streamsize)buf.data.size());
+    }
+
+    // Emit a tiny function:
+    // push rbp
+    // mov rbp, rsp
+    // mov rax, imm64
+    // pop rbp
+    // ret
+    static void emit_function_return_const(CodeBuffer& cb, uint64_t imm) {
+        // push rbp
+        cb.emit(0x55);
+        // mov rbp, rsp
+        cb.emit(0x48); cb.emit(0x89); cb.emit(0xE5);
+        // mov rax, imm64
+        cb.emit(0x48); cb.emit(0xB8);
+        cb.emit64(imm);
+        // pop rbp
+        cb.emit(0x5D);
+        // ret
+        cb.emit(0xC3);
+    }
+
+    static void write_stub(const std::string& out_prefix, const std::string& proc_name, uint64_t retval = 0) {
+        CodeBuffer cb;
+        emit_function_return_const(cb, retval);
+        std::string fname = sanitize_filename(out_prefix + "_" + proc_name + ".bin");
+        write_blob_to_file(fname, cb);
+    }
+} // namespace x64stub
+
+// ----------------------------- Translator (lowering/emit hook) ------------
+// Translator converts Proc body into an ActionPlan: each action is a
+// deterministic lambda that mutates the execution context. CIAMs already ran
+// at the token level during lexing, but here we provide small expansions
+// (choose_max/min lowering) as well.
+
+// (The rest of translator follows — previously implemented below.)
+
+// ----------------------------- Translator (continued) ----------------------
+
 static ActionPlan translate_proc_to_plan(const Proc& proc, Program& P, ContextFrame& base_ctx, std::map<std::string,Proc>& procmap) {
     ActionPlan plan;
     // locals map for procedure state
@@ -931,6 +1000,14 @@ static ResolveResult resolve_and_run(const std::string& source, const std::strin
     auto it = procmap.find(main_proc_name);
     if (it == procmap.end()) throw std::runtime_error("no main proc found");
     ActionPlan plan = translate_proc_to_plan(it->second, prog, ctx, procmap);
+
+    // Lightweight lowering: emit a tiny native stub that returns 0 for the proc.
+    try {
+        x64stub::write_stub("resolver_native", it->second.name, 0);
+    } catch (const std::exception& ex) {
+        // Emission failure should not stop resolution/execution; annotate context
+        ctx.annotate(std::string("native_emit_failed: ") + ex.what());
+    }
 
     // execute plan deterministically
     auto [final_ctx, trace] = execute_plan(plan, ctx);
