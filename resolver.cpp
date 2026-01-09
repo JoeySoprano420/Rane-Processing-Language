@@ -918,9 +918,9 @@ static ResolveResult resolve_and_run(const std::string& source, const std::strin
     Parser P(std::move(toks));
     Program prog = P.parse_program();
 
-    // build proc map
+    // build proc map (deep-clone to avoid copying unique_ptrs)
     std::map<std::string,Proc> procmap;
-    for (auto &pr : prog.procs) procmap[pr.name] = pr;
+    for (const auto &pr : prog.procs) procmap.emplace(pr.name, clone_proc(pr));
 
     // initial context frame
     ContextFrame ctx;
