@@ -1,0 +1,924 @@
+// Resolver.cpp
+// A CIAM-driven Processor → Translator → Executor for a substantial subset of syntax.rane
+// C++20 - single-file self-contained resolver for bootstrap use and testing.
+//
+// - Lexes syntax.rane, runs CIAMS token rewrites, parses a practical subset
+//   (imports, mmio region, proc, let, return, expr statements, calls, print, read32/write32,
+//    labels, trap/halt, basic goto form).
+// - Translator produces an ActionPlan (sequence of Actions).
+// - Executor runs actions deterministically and records a trace.
+// - Designed to be pragmatic: deterministic, auditable, and extensible CIAM points.
+//
+// Notes:
+// - This is not a full compiler. It focuses on deterministic resolution of the
+//   sample `syntax.rane` surface used by the bootstrap parser and provides
+//   clear extension points (CIAM registration, lowering, codegen).
+//
+// Build: Use your normal Visual Studio toolchain (C++20). Place this file in
+// the project and include it in the build.
+
+#include <algorithm>
+#include <chrono>
+#include <cctype>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <optional>
+#include <set>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace resolver {
+
+// ----------------------------- Utilities ----------------------------------
+
+static std::string read_file_all(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("failed to open file: " + path);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+static std::string trim_copy(std::string s) {
+    auto l = s.find_first_not_of(" \t\r\n");
+    if (l == std::string::npos) return "";
+    auto r = s.find_last_not_of(" \t\r\n");
+    return s.substr(l, r - l + 1);
+}
+
+// ----------------------------- Lexer / Tokens ------------------------------
+
+enum class TokenKind { Eof, Ident, Kw, Number, String, Char, Sym, HashIdent };
+
+struct Token {
+    TokenKind kind = TokenKind::Eof;
+    std::string lexeme;
+    int line = 0, col = 0;
+};
+
+struct RuleDB {
+    std::set<std::string> keywords;
+    RuleDB() {
+        const char* kws[] = {
+            "let","if","then","else","elif","while","do","for","break","continue","return","ret",
+            "proc","def","call","import","export","include","exclude","decide","case","default",
+            "jump","goto","mark","label","guard","zone","hot","cold","deterministic","repeat","unroll",
+            "not","and","or","xor","shl","shr","sar","print","mmio","region","read32","write32",
+            "trap","halt","label","module","struct","type","typealias","namespace","true","false","null",
+            "choose","max","min","addr","load","store"
+        };
+        for (auto k : kws) keywords.insert(k);
+    }
+    bool is_keyword(const std::string& s) const { return keywords.count(s) > 0; }
+};
+
+class Lexer {
+    std::string src;
+    size_t i = 0;
+    int line = 1, col = 1;
+    RuleDB const* rules = nullptr;
+
+    char peek(size_t off = 0) const { return (i + off < src.size()) ? src[i + off] : '\0'; }
+    char getch() {
+        char c = peek();
+        if (!c) return c;
+        ++i;
+        if (c == '\n') { ++line; col = 1; } else ++col;
+        return c;
+    }
+    void skip_ws_and_comments() {
+        for (;;) {
+            while (std::isspace((unsigned char)peek())) getch();
+            if (peek() == '/' && peek(1) == '/') {
+                getch(); getch();
+                while (peek() && peek() != '\n') getch();
+                continue;
+            }
+            if (peek() == '/' && peek(1) == '*') {
+                getch(); getch();
+                int depth = 1;
+                while (peek()) {
+                    if (peek() == '/' && peek(1) == '*') { getch(); getch(); ++depth; continue; }
+                    if (peek() == '*' && peek(1) == '/') { getch(); getch(); --depth; if (depth == 0) break; continue; }
+                    getch();
+                }
+                continue;
+            }
+            break;
+        }
+    }
+
+public:
+    Lexer(std::string s, const RuleDB* r) : src(std::move(s)), rules(r) {}
+
+    Token next() {
+        skip_ws_and_comments();
+        Token t; t.line = line; t.col = col;
+        char c = peek();
+        if (!c) { t.kind = TokenKind::Eof; return t; }
+        if (c == '#') {
+            getch();
+            t.lexeme.push_back('#');
+            while (std::isalnum((unsigned char)peek()) || peek() == '_' || peek() == ':') t.lexeme.push_back(getch());
+            t.kind = TokenKind::HashIdent;
+            return t;
+        }
+        if (std::isalpha((unsigned char)c) || c == '_') {
+            while (std::isalnum((unsigned char)peek()) || peek() == '_' || peek() == '?') t.lexeme.push_back(getch());
+            if (rules && rules->is_keyword(t.lexeme)) t.kind = TokenKind::Kw;
+            else t.kind = TokenKind::Ident;
+            return t;
+        }
+        if (std::isdigit((unsigned char)c)) {
+            if (c == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
+                t.lexeme.push_back(getch()); t.lexeme.push_back(getch());
+                while (std::isxdigit((unsigned char)peek()) || peek() == '_') t.lexeme.push_back(getch());
+                t.kind = TokenKind::Number; return t;
+            }
+            if (c == '0' && (peek(1) == 'b' || peek(1) == 'B')) {
+                t.lexeme.push_back(getch()); t.lexeme.push_back(getch());
+                while ((peek() == '0' || peek() == '1' || peek() == '_')) t.lexeme.push_back(getch());
+                t.kind = TokenKind::Number; return t;
+            }
+            bool seenDot = false;
+            while (std::isdigit((unsigned char)peek()) || peek() == '_' || (!seenDot && peek() == '.')) {
+                if (peek() == '.') seenDot = true;
+                t.lexeme.push_back(getch());
+            }
+            t.kind = TokenKind::Number; return t;
+        }
+        if (c == '"' || c == '\'') {
+            char q = getch();
+            bool isChar = (q == '\'');
+            while (peek() && peek() != q) {
+                char ch = getch();
+                if (ch == '\\' && peek()) { t.lexeme.push_back(ch); t.lexeme.push_back(getch()); }
+                else t.lexeme.push_back(ch);
+            }
+            if (peek() == q) getch();
+            t.kind = isChar ? TokenKind::Char : TokenKind::String;
+            return t;
+        }
+        // two-char symbols
+        std::string two; two.push_back(peek()); two.push_back(peek(1));
+        if (two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "&&" || two == "||" ||
+            two == "<<" || two == ">>" || two == "->" || two == "::" || two == "=>" ) {
+            t.lexeme = two; getch(); getch(); t.kind = TokenKind::Sym; return t;
+        }
+        // single char sym
+        t.lexeme.push_back(getch()); t.kind = TokenKind::Sym; return t;
+    }
+
+    std::vector<Token> lex_all() {
+        std::vector<Token> out;
+        for (;;) {
+            Token t = next();
+            if (t.kind == TokenKind::Eof) break;
+            out.push_back(std::move(t));
+        }
+        return out;
+    }
+};
+
+// ----------------------------- CIAMS --------------------------------------
+// Simple CIAM token-level rewrites used by parser to normalize surface.
+// - word->symbol rewrites: and/or/xor/not/shl/shr/sar => &&/||/^/!/<< >> >>
+// - choose max/min fusion: `choose max(a,b)` => Ident `choose_max` '(' ...
+// - convert '=' to '==' in expression contexts (heuristic).
+
+static void ciams_run(std::vector<Token>& toks) {
+    for (auto &t : toks) {
+        if (t.kind == TokenKind::Kw) {
+            if (t.lexeme == "xor") { t.kind = TokenKind::Sym; t.lexeme = "^"; }
+            if (t.lexeme == "and") { t.kind = TokenKind::Sym; t.lexeme = "&&"; }
+            if (t.lexeme == "or")  { t.kind = TokenKind::Sym; t.lexeme = "||"; }
+            if (t.lexeme == "not") { t.kind = TokenKind::Sym; t.lexeme = "!"; }
+            if (t.lexeme == "shl") { t.kind = TokenKind::Sym; t.lexeme = "<<"; }
+            if (t.lexeme == "shr" || t.lexeme == "sar") { t.kind = TokenKind::Sym; t.lexeme = ">>"; }
+        }
+    }
+    // '=' heuristic to '==' except after 'let'
+    for (size_t i = 1; i + 1 < toks.size(); ++i) {
+        if (toks[i].kind == TokenKind::Sym && toks[i].lexeme == "=") {
+            bool left_is_let = (toks[i-1].kind == TokenKind::Kw && toks[i-1].lexeme == "let");
+            bool left_is_comma = (toks[i-1].kind == TokenKind::Sym && toks[i-1].lexeme == ",");
+            if (!left_is_let && !left_is_comma) toks[i].lexeme = "==";
+        }
+    }
+    // choose max/min fusion
+    for (size_t i = 2; i + 1 < toks.size(); ++i) {
+        if (toks[i-2].kind == TokenKind::Kw && toks[i-2].lexeme == "choose" &&
+            toks[i-1].kind == TokenKind::Ident &&
+            (toks[i-1].lexeme == "max" || toks[i-1].lexeme == "min") &&
+            toks[i].kind == TokenKind::Sym && toks[i].lexeme == "(") {
+            toks[i-1].lexeme = std::string("choose_") + toks[i-1].lexeme;
+            toks.erase(toks.begin() + (i-2));
+            i = (i >= 3) ? i - 3 : 0;
+        }
+    }
+}
+
+// ----------------------------- AST ----------------------------------------
+
+struct Expr;
+struct Stmt;
+struct Proc;
+struct Program;
+
+using ExprPtr = std::unique_ptr<Expr>;
+using StmtPtr = std::unique_ptr<Stmt>;
+
+struct Expr {
+    enum Kind {
+        IntLit, FloatLit, StrLit, BoolLit, NullLit, Ident, HashIdent,
+        Unary, Binary, Call, Ternary, ArrayLit, Field, Index
+    } kind = IntLit;
+    std::string text;               // literal text or ident
+    std::string op;                 // operator for unary/binary
+    std::vector<ExprPtr> args;      // children
+};
+
+struct Stmt {
+    enum Kind { Let, Return, ExprStmt, Label, Goto, Trap, Halt, Read32, Write32, CallStmt } kind = ExprStmt;
+    std::string name;               // let name, label name, etc
+    ExprPtr expr;                   // expression for let/return/exprstmt
+    // Goto specifics: condition expr and two labels
+    ExprPtr cond;
+    std::string true_label, false_label;
+    // call stmt specifics
+    std::string call_into_slot;
+    // read32/write32 specifics
+    std::string mmio_reg;
+    std::vector<std::string> mmio_args;
+};
+
+struct Proc {
+    std::string name;
+    std::vector<std::string> params;
+    std::vector<StmtPtr> body;
+};
+
+struct Program {
+    std::vector<Proc> procs;
+    std::map<std::string, std::string> env; // mmio register initial values etc
+    std::map<std::string,int64_t> numeric_invariants; // e.g., balances
+};
+
+// ----------------------------- Parser -------------------------------------
+
+struct Parser {
+    std::vector<Token> toks;
+    size_t p = 0;
+
+    Parser(std::vector<Token> t): toks(std::move(t)) {}
+
+    const Token& cur() const { static Token eof{TokenKind::Eof,"",0,0}; return p < toks.size() ? toks[p] : eof; }
+    bool accept(TokenKind k, const std::string& s = "") {
+        if (cur().kind == k && (s.empty() || cur().lexeme == s)) { ++p; return true; }
+        return false;
+    }
+    bool accept_kw(const std::string& s) { return accept(TokenKind::Kw, s); }
+    bool accept_ident(std::string &out) {
+        if (cur().kind == TokenKind::Ident) { out = cur().lexeme; ++p; return true; }
+        return false;
+    }
+    void expect_sym(const std::string& s) { if (!accept(TokenKind::Sym, s)) throw std::runtime_error("expected symbol: " + s + " got " + cur().lexeme); }
+
+    // top-level parser
+    Program parse_program() {
+        Program prog;
+        while (p < toks.size()) {
+            if (cur().kind == TokenKind::Kw && cur().lexeme == "import") {
+                // skip import line
+                ++p;
+                if (cur().kind == TokenKind::Ident) ++p;
+                continue;
+            }
+            if (cur().kind == TokenKind::Kw && cur().lexeme == "mmio") {
+                // mmio region REG from 4096 size 256;
+                ++p;
+                if (cur().kind == TokenKind::Kw && cur().lexeme == "region") ++p;
+                std::string reg;
+                if (cur().kind == TokenKind::Ident) { reg = cur().lexeme; ++p; }
+                // find numeric 'from' and 'size' tokens, but keep simple:
+                // store env registry with placeholder "0"
+                prog.env[reg] = "0";
+                // skip to semicolon
+                while (p < toks.size() && !(cur().kind == TokenKind::Sym && cur().lexeme == ";")) ++p;
+                if (p < toks.size()) ++p;
+                continue;
+            }
+            if (cur().kind == TokenKind::Kw && cur().lexeme == "proc") {
+                prog.procs.push_back(parse_proc());
+                continue;
+            }
+            // else consume token
+            ++p;
+        }
+        return prog;
+    }
+
+    Proc parse_proc() {
+        if (!(cur().kind == TokenKind::Kw && cur().lexeme == "proc")) throw std::runtime_error("expected proc");
+        ++p;
+        Proc pr;
+        if (cur().kind != TokenKind::Ident) throw std::runtime_error("expected proc name");
+        pr.name = cur().lexeme; ++p;
+        expect_sym("(");
+        if (!accept(TokenKind::Sym, ")")) {
+            for (;;) {
+                if (cur().kind != TokenKind::Ident) throw std::runtime_error("expected param");
+                pr.params.push_back(cur().lexeme); ++p;
+                if (accept(TokenKind::Sym, ")")) break;
+                expect_sym(",");
+            }
+        }
+        expect_sym("{");
+        while (!(cur().kind == TokenKind::Sym && cur().lexeme == "}")) {
+            pr.body.push_back(parse_stmt());
+        }
+        expect_sym("}");
+        return pr;
+    }
+
+    StmtPtr parse_stmt() {
+        // let
+        if (cur().kind == TokenKind::Kw && cur().lexeme == "let") {
+            ++p;
+            if (cur().kind != TokenKind::Ident) throw std::runtime_error("expected ident after let");
+            std::string name = cur().lexeme; ++p;
+            expect_sym("=");
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::Let;
+            s->name = name;
+            s->expr = parse_expr();
+            accept(TokenKind::Sym, ";");
+            return s;
+        }
+        // return
+        if (cur().kind == TokenKind::Kw && (cur().lexeme == "return" || cur().lexeme == "ret")) {
+            ++p;
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::Return;
+            s->expr = parse_expr();
+            accept(TokenKind::Sym, ";");
+            return s;
+        }
+        // label
+        if (cur().kind == TokenKind::Kw && cur().lexeme == "label") {
+            ++p;
+            std::string lab;
+            if (cur().kind == TokenKind::Ident) { lab = cur().lexeme; ++p; }
+            accept(TokenKind::Sym, ";");
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::Label;
+            s->name = lab;
+            return s;
+        }
+        // trap / halt
+        if (cur().kind == TokenKind::Kw && cur().lexeme == "trap") {
+            ++p;
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::Trap;
+            // optional number
+            if (cur().kind == TokenKind::Number) ++p;
+            accept(TokenKind::Sym, ";");
+            return s;
+        }
+        if (cur().kind == TokenKind::Kw && cur().lexeme == "halt") {
+            ++p;
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::Halt;
+            accept(TokenKind::Sym, ";");
+            return s;
+        }
+        // read32 REG, 0 into x;
+        if (cur().kind == TokenKind::Kw && cur().lexeme == "read32") {
+            ++p;
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::Read32;
+            // expect REG, offset into var
+            if (cur().kind == TokenKind::Ident) s->mmio_reg = cur().lexeme, ++p;
+            if (accept(TokenKind::Sym, ",")) {
+                if (cur().kind == TokenKind::Number) s->mmio_args.push_back(cur().lexeme), ++p;
+            }
+            if (cur().kind == TokenKind::Kw && cur().lexeme == "into") ++p;
+            if (cur().kind == TokenKind::Ident) s->name = cur().lexeme, ++p;
+            accept(TokenKind::Sym, ";");
+            return s;
+        }
+        // write32 REG, 4, 123;
+        if (cur().kind == TokenKind::Kw && cur().lexeme == "write32") {
+            ++p;
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::Write32;
+            if (cur().kind == TokenKind::Ident) s->mmio_reg = cur().lexeme, ++p;
+            if (accept(TokenKind::Sym, ",")) {
+                if (cur().kind == TokenKind::Number) s->mmio_args.push_back(cur().lexeme), ++p;
+                if (accept(TokenKind::Sym, ",")) {
+                    if (cur().kind == TokenKind::Number) s->mmio_args.push_back(cur().lexeme), ++p;
+                }
+            }
+            accept(TokenKind::Sym, ";");
+            return s;
+        }
+        // goto (expr) -> L_true, L_false;
+        if (cur().kind == TokenKind::Kw && cur().lexeme == "goto") {
+            ++p;
+            expect_sym("(");
+            auto cond = parse_expr();
+            expect_sym(")");
+            expect_sym("->");
+            std::string tlab, flab;
+            if (cur().kind == TokenKind::Ident) { tlab = cur().lexeme; ++p; }
+            expect_sym(",");
+            if (cur().kind == TokenKind::Ident) { flab = cur().lexeme; ++p; }
+            accept(TokenKind::Sym, ";");
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::Goto;
+            s->cond = std::move(cond);
+            s->true_label = tlab;
+            s->false_label = flab;
+            return s;
+        }
+        // call identity(123) into slot 1;
+        if (cur().kind == TokenKind::Kw && cur().lexeme == "call") {
+            ++p;
+            auto call = parse_expr();
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::CallStmt;
+            s->expr = std::move(call);
+            if (cur().kind == TokenKind::Kw && cur().lexeme == "into") ++p;
+            if (cur().kind == TokenKind::Ident) { s->call_into_slot = cur().lexeme; ++p; }
+            else if (cur().kind == TokenKind::Number) { s->call_into_slot = cur().lexeme; ++p; }
+            accept(TokenKind::Sym, ";");
+            return s;
+        }
+        // generic expression stmt (print/func call/assignment handled by parser->expr)
+        {
+            auto s = std::make_unique<Stmt>();
+            s->kind = Stmt::ExprStmt;
+            s->expr = parse_expr();
+            accept(TokenKind::Sym, ";");
+            return s;
+        }
+    }
+
+    ExprPtr parse_expr() {
+        return parse_bin_rhs(1, parse_unary());
+    }
+
+    ExprPtr parse_primary() {
+        if (cur().kind == TokenKind::Number) {
+            auto e = std::make_unique<Expr>(); e->kind = Expr::IntLit; e->text = cur().lexeme; ++p; return e;
+        }
+        if (cur().kind == TokenKind::String) {
+            auto e = std::make_unique<Expr>(); e->kind = Expr::StrLit; e->text = cur().lexeme; ++p; return e;
+        }
+        if (cur().kind == TokenKind::Kw && (cur().lexeme == "true" || cur().lexeme == "false")) {
+            auto e = std::make_unique<Expr>(); e->kind = Expr::BoolLit; e->text = cur().lexeme; ++p; return e;
+        }
+        if (cur().kind == TokenKind::Kw && cur().lexeme == "null") {
+            auto e = std::make_unique<Expr>(); e->kind = Expr::NullLit; ++p; return e;
+        }
+        if (cur().kind == TokenKind::HashIdent) {
+            auto e = std::make_unique<Expr>(); e->kind = Expr::HashIdent; e->text = cur().lexeme; ++p; return e;
+        }
+        if (cur().kind == TokenKind::Ident) {
+            std::string id = cur().lexeme; ++p;
+            // call or ident or qualified
+            if (accept(TokenKind::Sym, "(")) {
+                auto call = std::make_unique<Expr>(); call->kind = Expr::Call; call->text = id;
+                if (!accept(TokenKind::Sym, ")")) {
+                    for (;;) {
+                        call->args.push_back(parse_expr());
+                        if (accept(TokenKind::Sym, ")")) break;
+                        expect_sym(",");
+                    }
+                }
+                return call;
+            }
+            auto e = std::make_unique<Expr>(); e->kind = Expr::Ident; e->text = id; return e;
+        }
+        if (accept(TokenKind::Sym, "(")) {
+            auto e = parse_expr();
+            expect_sym(")");
+            return e;
+        }
+        // fallback zero literal
+        auto e = std::make_unique<Expr>(); e->kind = Expr::IntLit; e->text = "0"; return e;
+    }
+
+    ExprPtr parse_unary() {
+        if (cur().kind == TokenKind::Sym && (cur().lexeme == "!" || cur().lexeme == "-" || cur().lexeme == "~")) {
+            std::string op = cur().lexeme; ++p;
+            auto rhs = parse_unary();
+            auto e = std::make_unique<Expr>(); e->kind = Expr::Unary; e->op = op; e->args.push_back(std::move(rhs)); return e;
+        }
+        return parse_primary();
+    }
+
+    int prec_of(const Token& t) const {
+        if (t.kind != TokenKind::Sym) return -1;
+        const std::string& op = t.lexeme;
+        if (op == "||") return 1;
+        if (op == "&&") return 2;
+        if (op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=") return 3;
+        if (op == "|" ) return 4;
+        if (op == "^" ) return 5;
+        if (op == "&" ) return 6;
+        if (op == "<<" || op == ">>") return 7;
+        if (op == "+" || op == "-") return 8;
+        if (op == "*" || op == "/" || op == "%") return 9;
+        return -1;
+    }
+
+    ExprPtr parse_bin_rhs(int minPrec, ExprPtr lhs) {
+        for (;;) {
+            int prec = (cur().kind == TokenKind::Sym) ? prec_of(cur()) : -1;
+            if (prec < minPrec) return lhs;
+            Token op = cur(); ++p;
+            auto rhs = parse_unary();
+            int nextPrec = (cur().kind==TokenKind::Sym) ? prec_of(cur()) : -1;
+            if (nextPrec > prec) rhs = parse_bin_rhs(prec + 1, std::move(rhs));
+            auto e = std::make_unique<Expr>(); e->kind = Expr::Binary; e->op = op.lexeme;
+            e->args.push_back(std::move(lhs)); e->args.push_back(std::move(rhs));
+            lhs = std::move(e);
+        }
+    }
+};
+
+// ----------------------------- CIAM / Translator ---------------------------
+// Translator converts AST statements into an ActionPlan: each action is a
+// deterministic lambda that mutates the execution context. CIAMs already ran
+// at the token level during lexing, but here we provide small expansions
+// (choose_max/min lowering) as well.
+
+struct ContextFrame {
+    std::string subject;
+    std::map<std::string, int64_t> ints;
+    std::map<std::string, std::string> strings;
+    std::map<std::string, std::string> env; // mmio register values
+    std::vector<std::string> trace;
+    void annotate(const std::string& t) { trace.push_back(t); }
+};
+
+struct Action {
+    std::string name;
+    std::function<void(ContextFrame&)> impl;
+};
+
+struct ActionPlan {
+    std::vector<Action> actions;
+    void append(Action&& a) { actions.push_back(std::move(a)); }
+};
+
+// Expr evaluator used by actions - deterministic evaluation with simple types (ints & strings)
+struct EvalContext {
+    ContextFrame* ctx = nullptr;
+    std::map<std::string,int64_t>* locals = nullptr;
+    std::map<std::string,Proc>* funcs = nullptr;
+    int64_t eval_expr(const Expr* e) {
+        if (!e) return 0;
+        switch (e->kind) {
+            case Expr::IntLit: {
+                std::string s = e->text;
+                // remove underscores
+                std::string t; for (char c: s) if (c != '_') t.push_back(c);
+                try {
+                    if (t.size() > 2 && t[0]=='0' && (t[1]=='x' || t[1]=='X')) return (int64_t)std::stoll(t,nullptr,0);
+                    if (t.size() > 2 && t[0]=='0' && (t[1]=='b' || t[1]=='B')) return (int64_t)std::stoll(t.substr(2),nullptr,2);
+                    return (int64_t)std::stoll(t,nullptr,10);
+                } catch (...) { return 0; }
+            }
+            case Expr::BoolLit: {
+                if (e->text == "true") return 1; return 0;
+            }
+            case Expr::NullLit: return 0;
+            case Expr::Ident: {
+                auto it = locals->find(e->text);
+                if (it != locals->end()) return it->second;
+                auto it2 = ctx->ints.find(e->text);
+                if (it2 != ctx->ints.end()) return it2->second;
+                // fallback zero
+                return 0;
+            }
+            case Expr::Unary: {
+                int64_t v = eval_expr(e->args[0].get());
+                if (e->op == "-") return -v;
+                if (e->op == "!") return (v==0) ? 1 : 0;
+                if (e->op == "~") return ~v;
+                return v;
+            }
+            case Expr::Binary: {
+                int64_t a = eval_expr(e->args[0].get());
+                int64_t b = eval_expr(e->args[1].get());
+                if (e->op == "+") return a + b;
+                if (e->op == "-") return a - b;
+                if (e->op == "*") return a * b;
+                if (e->op == "/") return b != 0 ? a / b : 0;
+                if (e->op == "%") return b != 0 ? a % b : 0;
+                if (e->op == "&") return a & b;
+                if (e->op == "|") return a | b;
+                if (e->op == "^") return a ^ b;
+                if (e->op == "<<") return a << b;
+                if (e->op == ">>") return a >> b;
+                if (e->op == "==") return (a == b) ? 1 : 0;
+                if (e->op == "!=") return (a != b) ? 1 : 0;
+                if (e->op == "<") return (a < b) ? 1 : 0;
+                if (e->op == "<=") return (a <= b) ? 1 : 0;
+                if (e->op == ">") return (a > b) ? 1 : 0;
+                if (e->op == ">=") return (a >= b) ? 1 : 0;
+                if (e->op == "&&") return (a && b) ? 1 : 0;
+                if (e->op == "||") return (a || b) ? 1 : 0;
+                return 0;
+            }
+            case Expr::Call: {
+                // builtin: print, addr, load, store, choose_max, choose_min
+                if (e->text == "print") {
+                    // evaluate first arg as string if string literal else int
+                    std::string out;
+                    if (!e->args.empty()) {
+                        auto &arg = e->args[0];
+                        if (arg->kind == Expr::StrLit) out = arg->text;
+                        else out = std::to_string(eval_expr(arg.get()));
+                    }
+                    // deterministic output to stdout
+                    std::cout << out << std::endl;
+                    ctx->annotate(std::string("print:") + out);
+                    return 0;
+                }
+                if (e->text == "choose_max" || e->text == "choose_min") {
+                    if (e->args.size() >= 2) {
+                        int64_t a = eval_expr(e->args[0].get());
+                        int64_t b = eval_expr(e->args[1].get());
+                        if (e->text == "choose_max") return (a > b) ? a : b;
+                        return (a < b) ? a : b;
+                    }
+                    return 0;
+                }
+                if (e->text == "addr") {
+                    // return encoded int address: simple fold of args
+                    int64_t acc = 0;
+                    for (auto &a : e->args) acc = acc * 31 + eval_expr(a.get());
+                    return acc;
+                }
+                if (e->text == "load") {
+                    // load(type, addr_expr)
+                    if (e->args.size() >= 2) {
+                        int64_t addr = eval_expr(e->args[1].get());
+                        // deterministic: return ctx.ints[std::to_string(addr)]
+                        auto it = ctx->ints.find(std::to_string(addr));
+                        if (it != ctx->ints.end()) return it->second;
+                        return 0;
+                    }
+                    return 0;
+                }
+                if (e->text == "store") {
+                    // store(type, addr_expr, value)
+                    if (e->args.size() >= 3) {
+                        int64_t addr = eval_expr(e->args[1].get());
+                        int64_t val = eval_expr(e->args[2].get());
+                        ctx->ints[std::to_string(addr)] = val;
+                        return val;
+                    }
+                    return 0;
+                }
+                // user-defined function call: attempt to find proc and run
+                auto fit = funcs->find(e->text);
+                if (fit != funcs->end()) {
+                    // very simple: evaluate args and execute proc body with new locals
+                    std::map<std::string,int64_t> fn_locals;
+                    for (size_t i = 0; i < fit->second.params.size() && i < e->args.size(); ++i) {
+                        fn_locals[ fit->second.params[i] ] = eval_expr(e->args[i].get());
+                    }
+                    // interpret statements until return or end
+                    int64_t ret = 0;
+                    for (auto &stptr : fit->second.body) {
+                        if (!stptr) continue;
+                        if (stptr->kind == Stmt::Let) {
+                            int64_t v = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                            fn_locals[stptr->name] = v;
+                        } else if (stptr->kind == Stmt::Return) {
+                            ret = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                            return ret;
+                        } else if (stptr->kind == Stmt::ExprStmt) {
+                            EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                        }
+                    }
+                    return ret;
+                }
+                return 0;
+            }
+            default: return 0;
+        }
+        return 0;
+    }
+};
+
+// Translator: converts Proc body into ActionPlan actions (one action per stmt).
+static ActionPlan translate_proc_to_plan(const Proc& proc, Program& P, ContextFrame& base_ctx, std::map<std::string,Proc>& procmap) {
+    ActionPlan plan;
+    // locals map for procedure state
+    auto locals_ptr = std::make_shared<std::map<std::string,int64_t>>();
+    // convert each statement to an action
+    for (size_t si = 0; si < proc.body.size(); ++si) {
+        auto &st = proc.body[si];
+        if (!st) continue;
+        if (st->kind == Stmt::Let) {
+            Action a;
+            a.name = proc.name + "::let " + st->name;
+            a.impl = [e = st->expr.get(), locals_ptr, name = st->name, action_name = a.name](ContextFrame& ctx) {
+                EvalContext ev{ &ctx, locals_ptr.get(), nullptr };
+                int64_t val = ev.eval_expr(e);
+                (*locals_ptr)[name] = val;
+                ctx.annotate(action_name + " = " + std::to_string(val));
+            };
+            plan.append(std::move(a));
+        } else if (st->kind == Stmt::ExprStmt) {
+            // possibly a call like print(...)
+            Action a;
+            a.name = proc.name + "::exprstmt";
+            a.impl = [e = st->expr.get(), &procmap, locals_ptr](ContextFrame& ctx) {
+                EvalContext ev{ &ctx, locals_ptr.get(), &const_cast<std::map<std::string,Proc>&>(procmap) };
+                ev.eval_expr(e);
+            };
+            plan.append(std::move(a));
+        } else if (st->kind == Stmt::Return) {
+            Action a;
+            a.name = proc.name + "::return";
+            a.impl = [e = st->expr.get(), locals_ptr](ContextFrame& ctx) {
+                EvalContext ev{ &ctx, locals_ptr.get(), nullptr };
+                int64_t v = ev.eval_expr(e);
+                ctx.annotate("return " + std::to_string(v));
+                // No direct mechanism to stop plan; executor will continue - return is recorded.
+            };
+            plan.append(std::move(a));
+        } else if (st->kind == Stmt::Read32) {
+            Action a;
+            a.name = proc.name + "::read32 " + st->mmio_reg;
+            a.impl = [reg = st->mmio_reg, name = st->name](ContextFrame& ctx) {
+                auto it = ctx.env.find(reg);
+                std::string v = (it != ctx.env.end()) ? it->second : "0";
+                try { ctx.ints[name] = std::stoll(v); } catch(...) { ctx.ints[name] = 0; }
+                ctx.annotate("read32 " + reg + " -> " + name + " = " + v);
+            };
+            plan.append(std::move(a));
+        } else if (st->kind == Stmt::Write32) {
+            Action a;
+            a.name = proc.name + "::write32 " + st->mmio_reg;
+            a.impl = [reg = st->mmio_reg, args = st->mmio_args](ContextFrame& ctx) {
+                // args: offset, value
+                std::string v = (args.size() >= 2) ? args[1] : "0";
+                ctx.env[reg] = v;
+                ctx.annotate("write32 " + reg + " = " + v);
+            };
+            plan.append(std::move(a));
+        } else if (st->kind == Stmt::CallStmt) {
+            Action a;
+            a.name = proc.name + "::call";
+            a.impl = [e = st->expr.get(), locals_ptr, &procmap](ContextFrame& ctx) {
+                EvalContext ev{ &ctx, locals_ptr.get(), &const_cast<std::map<std::string,Proc>&>(procmap) };
+                ev.eval_expr(e);
+            };
+            plan.append(std::move(a));
+        } else if (st->kind == Stmt::Trap) {
+            Action a;
+            a.name = proc.name + "::trap";
+            a.impl = [](ContextFrame& ctx){ ctx.annotate("trap"); /* stop semantics could be added */ };
+            plan.append(std::move(a));
+        } else if (st->kind == Stmt::Halt) {
+            Action a;
+            a.name = proc.name + "::halt";
+            a.impl = [](ContextFrame& ctx){ ctx.annotate("halt"); };
+            plan.append(std::move(a));
+        } else if (st->kind == Stmt::Label) {
+            // labels are no-op at action level but annotated
+            Action a;
+            a.name = proc.name + "::label " + st->name;
+            a.impl = [lbl = st->name](ContextFrame& ctx){ ctx.annotate("label:" + lbl); };
+            plan.append(std::move(a));
+        } else if (st->kind == Stmt::Goto) {
+            // For determinism we evaluate condition and annotate which branch taken.
+            Action a;
+            a.name = proc.name + "::goto";
+            a.impl = [cond = st->cond.get(), t = st->true_label, f = st->false_label, locals_ptr](ContextFrame& ctx){
+                EvalContext ev{ &ctx, locals_ptr.get(), nullptr };
+                int64_t v = ev.eval_expr(cond);
+                if (v) ctx.annotate("goto true -> " + t);
+                else ctx.annotate("goto false -> " + f);
+            };
+            plan.append(std::move(a));
+        } else {
+            // fallback no-op
+            Action a; a.name = proc.name + "::nop"; a.impl = [](ContextFrame& ctx){};
+            plan.append(std::move(a));
+        }
+    }
+    return plan;
+}
+
+// ----------------------------- Executor -----------------------------------
+
+struct ExecStep {
+    std::chrono::steady_clock::time_point ts;
+    std::string action;
+    std::string note;
+};
+
+struct ExecutionTrace {
+    std::vector<ExecStep> steps;
+    void push(std::string a, std::string note="") { steps.push_back({ std::chrono::steady_clock::now(), std::move(a), std::move(note) }); }
+};
+
+static std::pair<ContextFrame, ExecutionTrace> execute_plan(ActionPlan const& plan, ContextFrame ctx) {
+    ExecutionTrace trace;
+    for (auto const& a : plan.actions) {
+        try {
+            a.impl(ctx);
+            trace.push(a.name, "ok");
+        } catch (const std::exception& ex) {
+            trace.push(a.name, std::string("ex: ") + ex.what());
+            break;
+        } catch (...) {
+            trace.push(a.name, "unknown ex");
+            break;
+        }
+    }
+    return { std::move(ctx), std::move(trace) };
+}
+
+// ----------------------------- End-to-end Resolver API ---------------------
+
+struct ResolveResult {
+    ContextFrame final_ctx;
+    ExecutionTrace trace;
+};
+
+static ResolveResult resolve_and_run(const std::string& source, const std::string& main_proc_name = "main") {
+    RuleDB rules;
+    Lexer L(source, &rules);
+    auto toks = L.lex_all();
+    ciams_run(toks);
+    Parser P(std::move(toks));
+    Program prog = P.parse_program();
+
+    // build proc map
+    std::map<std::string,Proc> procmap;
+    for (auto &pr : prog.procs) procmap[pr.name] = pr;
+
+    // initial context frame
+    ContextFrame ctx;
+    for (auto &kv : prog.env) ctx.env[kv.first] = kv.second;
+    for (auto &kv : prog.numeric_invariants) ctx.ints[kv.first] = kv.second;
+
+    // translate selected proc to plan (main)
+    auto it = procmap.find(main_proc_name);
+    if (it == procmap.end()) throw std::runtime_error("no main proc found");
+    ActionPlan plan = translate_proc_to_plan(it->second, prog, ctx, procmap);
+
+    // execute plan deterministically
+    auto [final_ctx, trace] = execute_plan(plan, ctx);
+    return ResolveResult{ std::move(final_ctx), std::move(trace) };
+}
+
+} // namespace resolver
+
+// ----------------------------- small test harness --------------------------
+
+#ifdef RESOLVER_MAIN_TEST
+int main(int argc, char** argv) {
+    try {
+        std::string path = "syntax.rane";
+        if (argc > 1) path = argv[1];
+        std::string src = resolver::read_file_all(path);
+        auto res = resolver::resolve_and_run(src, "main");
+        std::cerr << "Execution trace:\n";
+        for (auto &s : res.trace.steps) {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(s.ts.time_since_epoch()).count();
+            std::cerr << "[" << ms << "] " << s.action << " -- " << s.note << "\n";
+        }
+        std::cerr << "Context traces:\n";
+        for (auto &t : res.final_ctx.trace) std::cerr << " - " << t << "\n";
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cerr << "fatal: " << ex.what() << "\n";
+        return 2;
+    }
+}
+#endif
+
+// To build and run the test harness, define RESOLVER_MAIN_TEST in the project settings
+// or compile with -DRESOLVER_MAIN_TEST and run the produced binary. The resolver will
+// attempt to load `syntax.rane` (or path provided as argv[1]) and execute `proc main()`.
