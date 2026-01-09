@@ -4,7 +4,7 @@
 //
 // - Lexes syntax.rane, runs CIAMS token rewrites, parses a practical subset
 //   (imports, mmio region, proc, let, return, expr statements, calls, print, read32/write32,
-//    labels, trap/halt, basic goto form).
+//    labels, trap/halt, basic goto form). 
 // - Translator produces an ActionPlan (sequence of Actions).
 // - Executor runs actions deterministically and records a trace.
 // - Designed to be pragmatic: deterministic, auditable, and extensible CIAM points.
@@ -55,6 +55,13 @@ static std::string trim_copy(std::string s) {
     if (l == std::string::npos) return "";
     auto r = s.find_last_not_of(" \t\r\n");
     return s.substr(l, r - l + 1);
+}
+
+static std::string sanitize_filename(std::string s) {
+    for (char &c : s) {
+        if (!(std::isalnum((unsigned char)c) || c == '.' || c == '_' || c == '-')) c = '_';
+    }
+    return s;
 }
 
 // ----------------------------- Lexer / Tokens ------------------------------
@@ -247,6 +254,7 @@ struct Expr {
     std::string text;               // literal text or ident
     std::string op;                 // operator for unary/binary
     std::vector<ExprPtr> args;      // children
+    ExprPtr cond;
 };
 
 struct Stmt {
@@ -274,6 +282,45 @@ struct Program {
     std::map<std::string, std::string> env; // mmio register initial values etc
     std::map<std::string,int64_t> numeric_invariants; // e.g., balances
 };
+
+// ----------------------------- Deep-clone helpers --------------------------
+// Unique_ptr-containing AST types are not copyable. We need deep clones when
+// building independent data structures (proc map). Implement small clone helpers.
+
+static ExprPtr clone_expr(const Expr* e) {
+    if (!e) return nullptr;
+    auto r = std::make_unique<Expr>();
+    r->kind = e->kind;
+    r->text = e->text;
+    r->op = e->op;
+    if (e->cond) r->cond = clone_expr(e->cond.get());
+    for (const auto &a : e->args) r->args.push_back(clone_expr(a.get()));
+    return r;
+}
+
+static StmtPtr clone_stmt(const Stmt* s) {
+    if (!s) return nullptr;
+    auto r = std::make_unique<Stmt>();
+    r->kind = s->kind;
+    r->name = s->name;
+    r->call_into_slot = s->call_into_slot;
+    r->mmio_reg = s->mmio_reg;
+    r->mmio_args = s->mmio_args;
+    r->true_label = s->true_label;
+    r->false_label = s->false_label;
+    r->expr = clone_expr(s->expr.get());
+    if (s->cond) r->cond = clone_expr(s->cond.get());
+    return r;
+}
+
+static Proc clone_proc(const Proc& p) {
+    Proc r;
+    r.name = p.name;
+    r.params = p.params;
+    r.body.reserve(p.body.size());
+    for (const auto &st : p.body) r.body.push_back(clone_stmt(st.get()));
+    return r;
+}
 
 // ----------------------------- Parser -------------------------------------
 
@@ -607,8 +654,10 @@ struct EvalContext {
             }
             case Expr::NullLit: return 0;
             case Expr::Ident: {
-                auto it = locals->find(e->text);
-                if (it != locals->end()) return it->second;
+                if (locals) {
+                    auto it = locals->find(e->text);
+                    if (it != locals->end()) return it->second;
+                }
                 auto it2 = ctx->ints.find(e->text);
                 if (it2 != ctx->ints.end()) return it2->second;
                 // fallback zero
@@ -696,28 +745,30 @@ struct EvalContext {
                     return 0;
                 }
                 // user-defined function call: attempt to find proc and run
-                auto fit = funcs->find(e->text);
-                if (fit != funcs->end()) {
-                    // very simple: evaluate args and execute proc body with new locals
-                    std::map<std::string,int64_t> fn_locals;
-                    for (size_t i = 0; i < fit->second.params.size() && i < e->args.size(); ++i) {
-                        fn_locals[ fit->second.params[i] ] = eval_expr(e->args[i].get());
-                    }
-                    // interpret statements until return or end
-                    int64_t ret = 0;
-                    for (auto &stptr : fit->second.body) {
-                        if (!stptr) continue;
-                        if (stptr->kind == Stmt::Let) {
-                            int64_t v = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
-                            fn_locals[stptr->name] = v;
-                        } else if (stptr->kind == Stmt::Return) {
-                            ret = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
-                            return ret;
-                        } else if (stptr->kind == Stmt::ExprStmt) {
-                            EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                if (funcs) {
+                    auto fit = funcs->find(e->text);
+                    if (fit != funcs->end()) {
+                        // very simple: evaluate args and execute proc body with new locals
+                        std::map<std::string,int64_t> fn_locals;
+                        for (size_t i = 0; i < fit->second.params.size() && i < e->args.size(); ++i) {
+                            fn_locals[ fit->second.params[i] ] = eval_expr(e->args[i].get());
                         }
+                        // interpret statements until return or end
+                        int64_t ret = 0;
+                        for (auto &stptr : fit->second.body) {
+                            if (!stptr) continue;
+                            if (stptr->kind == Stmt::Let) {
+                                int64_t v = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                                fn_locals[stptr->name] = v;
+                            } else if (stptr->kind == Stmt::Return) {
+                                ret = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                                return ret;
+                            } else if (stptr->kind == Stmt::ExprStmt) {
+                                EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                            }
+                        }
+                        return ret;
                     }
-                    return ret;
                 }
                 return 0;
             }
@@ -727,7 +778,69 @@ struct EvalContext {
     }
 };
 
-// Translator: converts Proc body into ActionPlan actions (one action per stmt).
+// ----------------------------- Lightweight x86-64 emitter stub ------------
+// Minimal deterministic native-code lowering stub: emits a tiny raw x86-64
+// function that returns a constant in RAX. This is a safe, platform-limited
+// lowering stub (no PE/ELF wrapper) intended to illustrate the pipeline.
+
+namespace x64stub {
+    using byte = uint8_t;
+    struct CodeBuffer {
+        std::vector<byte> data;
+        void emit(byte b) { data.push_back(b); }
+        void emit32(uint32_t x) {
+            for (int i = 0; i < 4; ++i) emit((byte)((x >> (i * 8)) & 0xFF));
+        }
+        void emit64(uint64_t x) {
+            for (int i = 0; i < 8; ++i) emit((byte)((x >> (i * 8)) & 0xFF));
+        }
+        size_t size() const { return data.size(); }
+    };
+
+    static void write_blob_to_file(const std::string& path, const CodeBuffer& buf) {
+        std::ofstream out(path, std::ios::binary);
+        if (!out) throw std::runtime_error("failed to write native stub: " + path);
+        out.write(reinterpret_cast<const char*>(buf.data.data()), (std::streamsize)buf.data.size());
+    }
+
+    // Emit a tiny function:
+    // push rbp
+    // mov rbp, rsp
+    // mov rax, imm64
+    // pop rbp
+    // ret
+    static void emit_function_return_const(CodeBuffer& cb, uint64_t imm) {
+        // push rbp
+        cb.emit(0x55);
+        // mov rbp, rsp
+        cb.emit(0x48); cb.emit(0x89); cb.emit(0xE5);
+        // mov rax, imm64
+        cb.emit(0x48); cb.emit(0xB8);
+        cb.emit64(imm);
+        // pop rbp
+        cb.emit(0x5D);
+        // ret
+        cb.emit(0xC3);
+    }
+
+    static void write_stub(const std::string& out_prefix, const std::string& proc_name, uint64_t retval = 0) {
+        CodeBuffer cb;
+        emit_function_return_const(cb, retval);
+        std::string fname = sanitize_filename(out_prefix + "_" + proc_name + ".bin");
+        write_blob_to_file(fname, cb);
+    }
+} // namespace x64stub
+
+// ----------------------------- Translator (lowering/emit hook) ------------
+// Translator converts Proc body into an ActionPlan: each action is a
+// deterministic lambda that mutates the execution context. CIAMs already ran
+// at the token level during lexing, but here we provide small expansions
+// (choose_max/min lowering) as well.
+
+// (The rest of translator follows — previously implemented below.)
+
+// ----------------------------- Translator (continued) ----------------------
+
 static ActionPlan translate_proc_to_plan(const Proc& proc, Program& P, ContextFrame& base_ctx, std::map<std::string,Proc>& procmap) {
     ActionPlan plan;
     // locals map for procedure state
@@ -874,9 +987,9 @@ static ResolveResult resolve_and_run(const std::string& source, const std::strin
     Parser P(std::move(toks));
     Program prog = P.parse_program();
 
-    // build proc map
+    // build proc map (deep-clone to avoid copying unique_ptrs)
     std::map<std::string,Proc> procmap;
-    for (auto &pr : prog.procs) procmap[pr.name] = pr;
+    for (const auto &pr : prog.procs) procmap.emplace(pr.name, clone_proc(pr));
 
     // initial context frame
     ContextFrame ctx;
@@ -887,6 +1000,14 @@ static ResolveResult resolve_and_run(const std::string& source, const std::strin
     auto it = procmap.find(main_proc_name);
     if (it == procmap.end()) throw std::runtime_error("no main proc found");
     ActionPlan plan = translate_proc_to_plan(it->second, prog, ctx, procmap);
+
+    // Lightweight lowering: emit a tiny native stub that returns 0 for the proc.
+    try {
+        x64stub::write_stub("resolver_native", it->second.name, 0);
+    } catch (const std::exception& ex) {
+        // Emission failure should not stop resolution/execution; annotate context
+        ctx.annotate(std::string("native_emit_failed: ") + ex.what());
+    }
 
     // execute plan deterministically
     auto [final_ctx, trace] = execute_plan(plan, ctx);
