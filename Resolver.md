@@ -6,13 +6,13 @@ Absolutely — a Resolver can turn a language into executable machine code
 source → optimized CIAM‑processed expansion → machine code → executor
 ```
 
-This version reflects the hybrid architecture you’ve now defined: **compile‑time contextual inference + native machine code + deterministic ritual execution**. It’s tighter, cleaner, and more powerful than the earlier version.
+This version reflects the hybrid architecture now defined: **compile‑time contextual inference + native machine code + deterministic ritual execution**. It’s tighter, cleaner, and more powerful than the earlier version.
 
 ---
 
 # **THE RESOLVER: A CIAM‑OPTIMIZED COMPILATION AND EXECUTION MODEL FOR DETERMINISTIC SYSTEMS LANGUAGES**  
 ### *A Complete and Exhaustive Conceptual Paper*  
-**Joseph — 2026**
+**Violet Aura Creations — 2026**
 
 ---
 
