@@ -4,7 +4,7 @@
 //
 // - Lexes syntax.rane, runs CIAMS token rewrites, parses a practical subset
 //   (imports, mmio region, proc, let, return, expr statements, calls, print, read32/write32,
-//    labels, trap/halt, basic goto form).
+//    labels, trap/halt, basic goto form). 
 // - Translator produces an ActionPlan (sequence of Actions).
 // - Executor runs actions deterministically and records a trace.
 // - Designed to be pragmatic: deterministic, auditable, and extensible CIAM points.
@@ -247,6 +247,7 @@ struct Expr {
     std::string text;               // literal text or ident
     std::string op;                 // operator for unary/binary
     std::vector<ExprPtr> args;      // children
+    ExprPtr cond;
 };
 
 struct Stmt {
@@ -274,6 +275,45 @@ struct Program {
     std::map<std::string, std::string> env; // mmio register initial values etc
     std::map<std::string,int64_t> numeric_invariants; // e.g., balances
 };
+
+// ----------------------------- Deep-clone helpers --------------------------
+// Unique_ptr-containing AST types are not copyable. We need deep clones when
+// building independent data structures (proc map). Implement small clone helpers.
+
+static ExprPtr clone_expr(const Expr* e) {
+    if (!e) return nullptr;
+    auto r = std::make_unique<Expr>();
+    r->kind = e->kind;
+    r->text = e->text;
+    r->op = e->op;
+    if (e->cond) r->cond = clone_expr(e->cond.get());
+    for (const auto &a : e->args) r->args.push_back(clone_expr(a.get()));
+    return r;
+}
+
+static StmtPtr clone_stmt(const Stmt* s) {
+    if (!s) return nullptr;
+    auto r = std::make_unique<Stmt>();
+    r->kind = s->kind;
+    r->name = s->name;
+    r->call_into_slot = s->call_into_slot;
+    r->mmio_reg = s->mmio_reg;
+    r->mmio_args = s->mmio_args;
+    r->true_label = s->true_label;
+    r->false_label = s->false_label;
+    r->expr = clone_expr(s->expr.get());
+    if (s->cond) r->cond = clone_expr(s->cond.get());
+    return r;
+}
+
+static Proc clone_proc(const Proc& p) {
+    Proc r;
+    r.name = p.name;
+    r.params = p.params;
+    r.body.reserve(p.body.size());
+    for (const auto &st : p.body) r.body.push_back(clone_stmt(st.get()));
+    return r;
+}
 
 // ----------------------------- Parser -------------------------------------
 
@@ -607,8 +647,10 @@ struct EvalContext {
             }
             case Expr::NullLit: return 0;
             case Expr::Ident: {
-                auto it = locals->find(e->text);
-                if (it != locals->end()) return it->second;
+                if (locals) {
+                    auto it = locals->find(e->text);
+                    if (it != locals->end()) return it->second;
+                }
                 auto it2 = ctx->ints.find(e->text);
                 if (it2 != ctx->ints.end()) return it2->second;
                 // fallback zero
@@ -696,28 +738,30 @@ struct EvalContext {
                     return 0;
                 }
                 // user-defined function call: attempt to find proc and run
-                auto fit = funcs->find(e->text);
-                if (fit != funcs->end()) {
-                    // very simple: evaluate args and execute proc body with new locals
-                    std::map<std::string,int64_t> fn_locals;
-                    for (size_t i = 0; i < fit->second.params.size() && i < e->args.size(); ++i) {
-                        fn_locals[ fit->second.params[i] ] = eval_expr(e->args[i].get());
-                    }
-                    // interpret statements until return or end
-                    int64_t ret = 0;
-                    for (auto &stptr : fit->second.body) {
-                        if (!stptr) continue;
-                        if (stptr->kind == Stmt::Let) {
-                            int64_t v = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
-                            fn_locals[stptr->name] = v;
-                        } else if (stptr->kind == Stmt::Return) {
-                            ret = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
-                            return ret;
-                        } else if (stptr->kind == Stmt::ExprStmt) {
-                            EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                if (funcs) {
+                    auto fit = funcs->find(e->text);
+                    if (fit != funcs->end()) {
+                        // very simple: evaluate args and execute proc body with new locals
+                        std::map<std::string,int64_t> fn_locals;
+                        for (size_t i = 0; i < fit->second.params.size() && i < e->args.size(); ++i) {
+                            fn_locals[ fit->second.params[i] ] = eval_expr(e->args[i].get());
                         }
+                        // interpret statements until return or end
+                        int64_t ret = 0;
+                        for (auto &stptr : fit->second.body) {
+                            if (!stptr) continue;
+                            if (stptr->kind == Stmt::Let) {
+                                int64_t v = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                                fn_locals[stptr->name] = v;
+                            } else if (stptr->kind == Stmt::Return) {
+                                ret = EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                                return ret;
+                            } else if (stptr->kind == Stmt::ExprStmt) {
+                                EvalContext{ctx, &fn_locals, funcs}.eval_expr(stptr->expr.get());
+                            }
+                        }
+                        return ret;
                     }
-                    return ret;
                 }
                 return 0;
             }
