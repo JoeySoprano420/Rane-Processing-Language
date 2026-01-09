@@ -79,7 +79,8 @@ struct RuleDB {
     RuleDB() {
         const char* kws[] = {
             "let","if","then","else","elif","while","do","for","break","continue","return","ret",
-            "proc","def","call","import","export","include","exclude","decide","case","default",
+            "proc","def","call","into", // added 'into' as keyword
+            "import","export","include","exclude","decide","case","default",
             "jump","goto","mark","label","guard","zone","hot","cold","deterministic","repeat","unroll",
             "not","and","or","xor","shl","shr","sar","print","mmio","region","read32","write32",
             "trap","halt","label","module","struct","type","typealias","namespace","true","false","null",
@@ -259,16 +260,20 @@ struct Expr {
 
 struct Stmt {
     enum Kind { Let, Return, ExprStmt, Label, Goto, Trap, Halt, Read32, Write32, CallStmt } kind = ExprStmt;
-    std::string name;               // let name, label name, etc
-    ExprPtr expr;                   // expression for let/return/exprstmt
-    // Goto specifics: condition expr and two labels
+    std::string name;
+    ExprPtr expr;
+
     ExprPtr cond;
     std::string true_label, false_label;
-    // call stmt specifics
+
     std::string call_into_slot;
+
     // read32/write32 specifics
     std::string mmio_reg;
-    std::vector<std::string> mmio_args;
+
+    // deterministic offset addressing + expr value support
+    ExprPtr mmio_offset;   // required for read32/write32
+    ExprPtr mmio_value;    // used for write32
 };
 
 struct Proc {
@@ -284,8 +289,6 @@ struct Program {
 };
 
 // ----------------------------- Deep-clone helpers --------------------------
-// Unique_ptr-containing AST types are not copyable. We need deep clones when
-// building independent data structures (proc map). Implement small clone helpers.
 
 static ExprPtr clone_expr(const Expr* e) {
     if (!e) return nullptr;
@@ -305,7 +308,8 @@ static StmtPtr clone_stmt(const Stmt* s) {
     r->name = s->name;
     r->call_into_slot = s->call_into_slot;
     r->mmio_reg = s->mmio_reg;
-    r->mmio_args = s->mmio_args;
+    if (s->mmio_offset) r->mmio_offset = clone_expr(s->mmio_offset.get());
+    if (s->mmio_value) r->mmio_value = clone_expr(s->mmio_value.get());
     r->true_label = s->true_label;
     r->false_label = s->false_label;
     r->expr = clone_expr(s->expr.get());
@@ -450,36 +454,45 @@ struct Parser {
             accept(TokenKind::Sym, ";");
             return s;
         }
-        // read32 REG, 0 into x;
+        // read32 REG, <expr> into x;
         if (cur().kind == TokenKind::Kw && cur().lexeme == "read32") {
             ++p;
             auto s = std::make_unique<Stmt>();
             s->kind = Stmt::Read32;
-            // expect REG, offset into var
-            if (cur().kind == TokenKind::Ident) s->mmio_reg = cur().lexeme, ++p;
-            if (accept(TokenKind::Sym, ",")) {
-                if (cur().kind == TokenKind::Number) s->mmio_args.push_back(cur().lexeme), ++p;
-            }
+
+            if (cur().kind == TokenKind::Ident) { s->mmio_reg = cur().lexeme; ++p; }
+
+            expect_sym(",");
+            s->mmio_offset = parse_expr();
+
             if (cur().kind == TokenKind::Kw && cur().lexeme == "into") ++p;
-            if (cur().kind == TokenKind::Ident) s->name = cur().lexeme, ++p;
+            else throw std::runtime_error("expected 'into' in read32");
+
+            if (cur().kind == TokenKind::Ident) { s->name = cur().lexeme; ++p; }
+            else throw std::runtime_error("expected destination ident after read32 ... into");
+
             accept(TokenKind::Sym, ";");
             return s;
         }
-        // write32 REG, 4, 123;
+
+        // write32 REG, <expr>, <expr>;
         if (cur().kind == TokenKind::Kw && cur().lexeme == "write32") {
             ++p;
             auto s = std::make_unique<Stmt>();
             s->kind = Stmt::Write32;
-            if (cur().kind == TokenKind::Ident) s->mmio_reg = cur().lexeme, ++p;
-            if (accept(TokenKind::Sym, ",")) {
-                if (cur().kind == TokenKind::Number) s->mmio_args.push_back(cur().lexeme), ++p;
-                if (accept(TokenKind::Sym, ",")) {
-                    if (cur().kind == TokenKind::Number) s->mmio_args.push_back(cur().lexeme), ++p;
-                }
-            }
+
+            if (cur().kind == TokenKind::Ident) { s->mmio_reg = cur().lexeme; ++p; }
+
+            expect_sym(",");
+            s->mmio_offset = parse_expr();
+
+            expect_sym(",");
+            s->mmio_value = parse_expr();
+
             accept(TokenKind::Sym, ";");
             return s;
         }
+
         // goto (expr) -> L_true, L_false;
         if (cur().kind == TokenKind::Kw && cur().lexeme == "goto") {
             ++p;
@@ -499,6 +512,7 @@ struct Parser {
             s->false_label = flab;
             return s;
         }
+
         // call identity(123) into slot 1;
         if (cur().kind == TokenKind::Kw && cur().lexeme == "call") {
             ++p;
@@ -607,10 +621,8 @@ struct Parser {
 };
 
 // ----------------------------- CIAM / Translator ---------------------------
-// Translator converts AST statements into an ActionPlan: each action is a
-// deterministic lambda that mutates the execution context. CIAMs already ran
-// at the token level during lexing, but here we provide small expansions
-// (choose_max/min lowering) as well.
+
+// ContextFrame and action/plan definitions updated to support control-flow, labels, mmio, traps.
 
 struct ContextFrame {
     std::string subject;
@@ -618,16 +630,32 @@ struct ContextFrame {
     std::map<std::string, std::string> strings;
     std::map<std::string, std::string> env; // mmio register values
     std::vector<std::string> trace;
+
+    // control flow / stopping
+    bool stop = false;
+    int64_t return_value = 0;
+
+    // deterministic trap info
+    bool trapped = false;
+    int64_t trap_code = 0;
+    std::string trap_reason;
+
+    // mmio behavior toggles
+    bool mmio_auto_normalize = false;
+
     void annotate(const std::string& t) { trace.push_back(t); }
 };
 
+// Action returns optional new instruction pointer (jump target index) or std::nullopt to continue
 struct Action {
     std::string name;
-    std::function<void(ContextFrame&)> impl;
+    std::function<std::optional<size_t>(ContextFrame&)> impl;
 };
 
 struct ActionPlan {
     std::vector<Action> actions;
+    std::unordered_map<std::string, size_t> label_to_ip;
+
     void append(Action&& a) { actions.push_back(std::move(a)); }
 };
 
@@ -779,9 +807,7 @@ struct EvalContext {
 };
 
 // ----------------------------- Lightweight x86-64 emitter stub ------------
-// Minimal deterministic native-code lowering stub: emits a tiny raw x86-64
-// function that returns a constant in RAX. This is a safe, platform-limited
-// lowering stub (no PE/ELF wrapper) intended to illustrate the pipeline.
+// (unchanged) emits tiny function blobs to illustrate native lowering.
 
 namespace x64stub {
     using byte = uint8_t;
@@ -832,113 +858,232 @@ namespace x64stub {
 } // namespace x64stub
 
 // ----------------------------- Translator (lowering/emit hook) ------------
-// Translator converts Proc body into an ActionPlan: each action is a
-// deterministic lambda that mutates the execution context. CIAMs already ran
-// at the token level during lexing, but here we provide small expansions
-// (choose_max/min lowering) as well.
 
-// (The rest of translator follows — previously implemented below.)
+// Helpers for mmio deterministic addressing and traps
 
-// ----------------------------- Translator (continued) ----------------------
+static std::string mmio_key(const std::string& reg, int64_t offset) {
+    return reg + "@" + std::to_string(offset);
+}
 
-static ActionPlan translate_proc_to_plan(const Proc& proc, Program& P, ContextFrame& base_ctx, std::map<std::string,Proc>& procmap) {
+static int64_t parse_i64_fallback(const std::string& s, int64_t def = 0) {
+    try { return (int64_t)std::stoll(s); } catch(...) { return def; }
+}
+
+static bool mmio_is_aligned4(int64_t byte_offset) {
+    return (byte_offset % 4) == 0;
+}
+
+static int64_t mmio_word_index(int64_t byte_offset) {
+    return byte_offset / 4;
+}
+
+static std::string mmio_word_key(const std::string& reg, int64_t word_index) {
+    return reg + "@w" + std::to_string(word_index);
+}
+
+static void mmio_trap(ContextFrame& ctx, int64_t code, const std::string& reason) {
+    ctx.trapped = true;
+    ctx.trap_code = code;
+    ctx.trap_reason = reason;
+    ctx.annotate("MMIO_TRAP code=" + std::to_string(code) + " reason=" + reason);
+    ctx.stop = true;
+}
+
+// ----------------------------- Translator -> ActionPlan --------------------
+
+static ActionPlan translate_proc_to_plan(
+    const Proc& proc,
+    Program& /*P*/,
+    ContextFrame& /*base_ctx*/,
+    std::map<std::string,Proc>& procmap
+) {
     ActionPlan plan;
-    // locals map for procedure state
     auto locals_ptr = std::make_shared<std::map<std::string,int64_t>>();
-    // convert each statement to an action
+
     for (size_t si = 0; si < proc.body.size(); ++si) {
         auto &st = proc.body[si];
         if (!st) continue;
+
+        if (st->kind == Stmt::Label) {
+            // record label ip = next action index (current size)
+            plan.label_to_ip[st->name] = plan.actions.size();
+
+            Action a;
+            a.name = proc.name + "::label " + st->name;
+            a.impl = [lbl = st->name](ContextFrame& ctx) -> std::optional<size_t> {
+                ctx.annotate("label:" + lbl);
+                return std::nullopt;
+            };
+            plan.append(std::move(a));
+            continue;
+        }
+
         if (st->kind == Stmt::Let) {
             Action a;
             a.name = proc.name + "::let " + st->name;
-            a.impl = [e = st->expr.get(), locals_ptr, name = st->name, action_name = a.name](ContextFrame& ctx) {
-                EvalContext ev{ &ctx, locals_ptr.get(), nullptr };
+            a.impl = [e = st->expr.get(), locals_ptr, name = st->name, &procmap, action_name = a.name]
+                     (ContextFrame& ctx) -> std::optional<size_t> {
+                EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
                 int64_t val = ev.eval_expr(e);
                 (*locals_ptr)[name] = val;
                 ctx.annotate(action_name + " = " + std::to_string(val));
+                return std::nullopt;
             };
             plan.append(std::move(a));
-        } else if (st->kind == Stmt::ExprStmt) {
-            // possibly a call like print(...)
+            continue;
+        }
+
+        if (st->kind == Stmt::ExprStmt || st->kind == Stmt::CallStmt) {
             Action a;
-            a.name = proc.name + "::exprstmt";
-            a.impl = [e = st->expr.get(), &procmap, locals_ptr](ContextFrame& ctx) {
-                EvalContext ev{ &ctx, locals_ptr.get(), &const_cast<std::map<std::string,Proc>&>(procmap) };
-                ev.eval_expr(e);
+            a.name = proc.name + "::expr";
+            a.impl = [e = st->expr.get(), locals_ptr, &procmap](ContextFrame& ctx) -> std::optional<size_t> {
+                EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
+                (void)ev.eval_expr(e);
+                return std::nullopt;
             };
             plan.append(std::move(a));
-        } else if (st->kind == Stmt::Return) {
+            continue;
+        }
+
+        if (st->kind == Stmt::Return) {
             Action a;
             a.name = proc.name + "::return";
-            a.impl = [e = st->expr.get(), locals_ptr](ContextFrame& ctx) {
-                EvalContext ev{ &ctx, locals_ptr.get(), nullptr };
+            a.impl = [e = st->expr.get(), locals_ptr, &procmap](ContextFrame& ctx) -> std::optional<size_t> {
+                EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
                 int64_t v = ev.eval_expr(e);
+                ctx.return_value = v;
                 ctx.annotate("return " + std::to_string(v));
-                // No direct mechanism to stop plan; executor will continue - return is recorded.
+                ctx.stop = true;
+                return std::nullopt;
             };
             plan.append(std::move(a));
-        } else if (st->kind == Stmt::Read32) {
-            Action a;
-            a.name = proc.name + "::read32 " + st->mmio_reg;
-            a.impl = [reg = st->mmio_reg, name = st->name](ContextFrame& ctx) {
-                auto it = ctx.env.find(reg);
-                std::string v = (it != ctx.env.end()) ? it->second : "0";
-                try { ctx.ints[name] = std::stoll(v); } catch(...) { ctx.ints[name] = 0; }
-                ctx.annotate("read32 " + reg + " -> " + name + " = " + v);
-            };
-            plan.append(std::move(a));
-        } else if (st->kind == Stmt::Write32) {
-            Action a;
-            a.name = proc.name + "::write32 " + st->mmio_reg;
-            a.impl = [reg = st->mmio_reg, args = st->mmio_args](ContextFrame& ctx) {
-                // args: offset, value
-                std::string v = (args.size() >= 2) ? args[1] : "0";
-                ctx.env[reg] = v;
-                ctx.annotate("write32 " + reg + " = " + v);
-            };
-            plan.append(std::move(a));
-        } else if (st->kind == Stmt::CallStmt) {
-            Action a;
-            a.name = proc.name + "::call";
-            a.impl = [e = st->expr.get(), locals_ptr, &procmap](ContextFrame& ctx) {
-                EvalContext ev{ &ctx, locals_ptr.get(), &const_cast<std::map<std::string,Proc>&>(procmap) };
-                ev.eval_expr(e);
-            };
-            plan.append(std::move(a));
-        } else if (st->kind == Stmt::Trap) {
+            continue;
+        }
+
+        if (st->kind == Stmt::Trap) {
             Action a;
             a.name = proc.name + "::trap";
-            a.impl = [](ContextFrame& ctx){ ctx.annotate("trap"); /* stop semantics could be added */ };
-            plan.append(std::move(a));
-        } else if (st->kind == Stmt::Halt) {
-            Action a;
-            a.name = proc.name + "::halt";
-            a.impl = [](ContextFrame& ctx){ ctx.annotate("halt"); };
-            plan.append(std::move(a));
-        } else if (st->kind == Stmt::Label) {
-            // labels are no-op at action level but annotated
-            Action a;
-            a.name = proc.name + "::label " + st->name;
-            a.impl = [lbl = st->name](ContextFrame& ctx){ ctx.annotate("label:" + lbl); };
-            plan.append(std::move(a));
-        } else if (st->kind == Stmt::Goto) {
-            // For determinism we evaluate condition and annotate which branch taken.
-            Action a;
-            a.name = proc.name + "::goto";
-            a.impl = [cond = st->cond.get(), t = st->true_label, f = st->false_label, locals_ptr](ContextFrame& ctx){
-                EvalContext ev{ &ctx, locals_ptr.get(), nullptr };
-                int64_t v = ev.eval_expr(cond);
-                if (v) ctx.annotate("goto true -> " + t);
-                else ctx.annotate("goto false -> " + f);
+            a.impl = [](ContextFrame& ctx) -> std::optional<size_t> {
+                ctx.annotate("trap");
+                ctx.stop = true;
+                return std::nullopt;
             };
             plan.append(std::move(a));
-        } else {
-            // fallback no-op
-            Action a; a.name = proc.name + "::nop"; a.impl = [](ContextFrame& ctx){};
-            plan.append(std::move(a));
+            continue;
         }
+
+        if (st->kind == Stmt::Halt) {
+            Action a;
+            a.name = proc.name + "::halt";
+            a.impl = [](ContextFrame& ctx) -> std::optional<size_t> {
+                ctx.annotate("halt");
+                ctx.stop = true;
+                return std::nullopt;
+            };
+            plan.append(std::move(a));
+            continue;
+        }
+
+        if (st->kind == Stmt::Read32) {
+            Action a;
+            a.name = proc.name + "::read32 " + st->mmio_reg;
+            a.impl = [reg = st->mmio_reg,
+                      offE = st->mmio_offset.get(),
+                      dst = st->name,
+                      locals_ptr, &procmap, &plan](ContextFrame& ctx) -> std::optional<size_t> {
+                EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
+                int64_t byte_off = ev.eval_expr(offE);
+
+                if (!mmio_is_aligned4(byte_off)) {
+                    if (!ctx.mmio_auto_normalize) {
+                        mmio_trap(ctx, 1001, "read32 misaligned byte_offset=" + std::to_string(byte_off) + " reg=" + reg);
+                        return std::nullopt;
+                    }
+                    int64_t norm = (byte_off >= 0) ? (byte_off & ~3LL) : -(((-byte_off) + 3) & ~3LL);
+                    ctx.annotate("mmio_normalize " + std::to_string(byte_off) + " -> " + std::to_string(norm));
+                    byte_off = norm;
+                }
+
+                int64_t w = mmio_word_index(byte_off);
+                const std::string key = mmio_word_key(reg, w);
+
+                auto it = ctx.env.find(key);
+                const std::string raw = (it != ctx.env.end()) ? it->second : "0";
+                int64_t val = parse_i64_fallback(raw, 0);
+
+                ctx.ints[dst] = val;
+                ctx.annotate("read32 " + reg + " byte_off=" + std::to_string(byte_off) +
+                             " word=" + std::to_string(w) + " -> " + dst + " = " + std::to_string(val));
+                return std::nullopt;
+            };
+            plan.append(std::move(a));
+            continue;
+        }
+
+        if (st->kind == Stmt::Write32) {
+            Action a;
+            a.name = proc.name + "::write32 " + st->mmio_reg;
+            a.impl = [reg = st->mmio_reg,
+                      offE = st->mmio_offset.get(),
+                      valE = st->mmio_value.get(),
+                      locals_ptr, &procmap, &plan](ContextFrame& ctx) -> std::optional<size_t> {
+                EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
+                int64_t byte_off = ev.eval_expr(offE);
+
+                if (!mmio_is_aligned4(byte_off)) {
+                    if (!ctx.mmio_auto_normalize) {
+                        mmio_trap(ctx, 1002, "write32 misaligned byte_offset=" + std::to_string(byte_off) + " reg=" + reg);
+                        return std::nullopt;
+                    }
+                    int64_t norm = (byte_off >= 0) ? (byte_off & ~3LL) : -(((-byte_off) + 3) & ~3LL);
+                    ctx.annotate("mmio_normalize " + std::to_string(byte_off) + " -> " + std::to_string(norm));
+                    byte_off = norm;
+                }
+
+                int64_t w = mmio_word_index(byte_off);
+                int64_t value = ev.eval_expr(valE);
+
+                const std::string key = mmio_word_key(reg, w);
+                ctx.env[key] = std::to_string(value);
+
+                ctx.annotate("write32 " + reg + " byte_off=" + std::to_string(byte_off) +
+                             " word=" + std::to_string(w) + " = " + std::to_string(value));
+                return std::nullopt;
+            };
+            plan.append(std::move(a));
+            continue;
+        }
+
+        if (st->kind == Stmt::Goto) {
+            Action a;
+            a.name = proc.name + "::goto";
+            a.impl = [cond = st->cond.get(), t = st->true_label, f = st->false_label,
+                      locals_ptr, &procmap, &plan](ContextFrame& ctx) -> std::optional<size_t> {
+                EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
+                int64_t v = ev.eval_expr(cond);
+
+                const std::string& target = v ? t : f;
+                ctx.annotate(std::string("goto ") + (v ? "true" : "false") + " -> " + target);
+
+                auto it = plan.label_to_ip.find(target);
+                if (it == plan.label_to_ip.end()) {
+                    ctx.annotate("goto_target_missing:" + target);
+                    ctx.stop = true;
+                    return std::nullopt;
+                }
+                return it->second; // jump ip
+            };
+            plan.append(std::move(a));
+            continue;
+        }
+
+        // fallback no-op
+        Action a;
+        a.name = proc.name + "::nop";
+        a.impl = [](ContextFrame&) -> std::optional<size_t> { return std::nullopt; };
+        plan.append(std::move(a));
     }
+
     return plan;
 }
 
@@ -957,10 +1102,19 @@ struct ExecutionTrace {
 
 static std::pair<ContextFrame, ExecutionTrace> execute_plan(ActionPlan const& plan, ContextFrame ctx) {
     ExecutionTrace trace;
-    for (auto const& a : plan.actions) {
+
+    size_t ip = 0;
+    while (ip < plan.actions.size()) {
+        auto const& a = plan.actions[ip];
         try {
-            a.impl(ctx);
+            auto jump = a.impl(ctx);
             trace.push(a.name, "ok");
+            if (ctx.stop) break;
+            if (jump.has_value()) {
+                ip = *jump;
+            } else {
+                ++ip;
+            }
         } catch (const std::exception& ex) {
             trace.push(a.name, std::string("ex: ") + ex.what());
             break;
@@ -969,6 +1123,7 @@ static std::pair<ContextFrame, ExecutionTrace> execute_plan(ActionPlan const& pl
             break;
         }
     }
+
     return { std::move(ctx), std::move(trace) };
 }
 
@@ -1043,3 +1198,4 @@ int main(int argc, char** argv) {
 // To build and run the test harness, define RESOLVER_MAIN_TEST in the project settings
 // or compile with -DRESOLVER_MAIN_TEST and run the produced binary. The resolver will
 // attempt to load `syntax.rane` (or path provided as argv[1]) and execute `proc main()`.
+
