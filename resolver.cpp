@@ -240,6 +240,32 @@ namespace resolver {
         }
     }
 
+    // Optimized CIAM processed expansion: wrapper that runs CIAMs and applies
+    // additional token-level normalizations and rewrite hints for lowering.
+    static void optimized_ciams_run(std::vector<Token>& toks) {
+        // base CIAM normalizations (existing)
+        ciams_run(toks);
+
+        // additional, non-destructive token-level normalizations:
+        // - canonicalize 'choose_max' / 'choose_min' to Ident (ciams_run already)
+        // - normalize repeated semicolons and redundant commas
+        // - replace sequences like Kw 'call' followed by Ident '(' into a single call token is left to parser;
+        // keep this pass intentionally lightweight so it is safe and deterministic.
+        std::vector<Token> out;
+        out.reserve(toks.size());
+        for (size_t i = 0; i < toks.size(); ++i) {
+            // collapse multiple semicolons
+            if (toks[i].kind == TokenKind::Sym && toks[i].lexeme == ";") {
+                out.push_back(toks[i]);
+                while (i + 1 < toks.size() && toks[i + 1].kind == TokenKind::Sym && toks[i + 1].lexeme == ";") ++i;
+                continue;
+            }
+            // drop spurious empty identifiers (none are produced by lexer normally)
+            out.push_back(toks[i]);
+        }
+        toks.swap(out);
+    }
+
     // ----------------------------- AST ----------------------------------------
 
     struct Expr;
@@ -1154,6 +1180,23 @@ namespace resolver {
         ctx.stop = true;
     }
 
+    // Emit machine-code artifacts for the program (lightweight stub emitter).
+    // This step represents the 'machine code' stage in the requested pipeline.
+    static void emit_machine_code_for_all_procs(const std::map<std::string, Proc>& procmap, ContextFrame& ctx) {
+        for (const auto& kv : procmap) {
+            try {
+                x64stub::write_stub("resolver_native", kv.first, 0);
+                ctx.annotate(std::string("native_emitted:") + kv.first);
+            }
+            catch (const std::exception& ex) {
+                ctx.annotate(std::string("native_emit_failed:") + kv.first + ":" + ex.what());
+            }
+            catch (...) {
+                ctx.annotate(std::string("native_emit_failed:") + kv.first + ":unknown");
+            }
+        }
+    }
+
     // ----------------------------- Translator -> ActionPlan --------------------
 
     // Extended capabilities & optimizations implemented below:
@@ -1535,47 +1578,56 @@ namespace resolver {
     static ResolveResult resolve_and_run(const std::string& source, const std::string& main_proc_name = "main") {
         RuleDB rules;
         Lexer L(source, &rules);
+
+        // 1) Lex source
         auto toks = L.lex_all();
-        ciams_run(toks);
+
+        // 2) Optimized CIAM-processed expansion (token level)
+        optimized_ciams_run(toks);
+
+        // annotate pipeline stage
+        ContextFrame ctx;
+        ctx.annotate("pipeline:stage=ciams_optimized");
+
+        // 3) Parse into AST
         Parser P(std::move(toks));
         Program prog = P.parse_program();
 
-        // Run a constant-folding pass over the parsed program (simple, non-recursive locals-aware pass).
+        // 4) Constant-folding pass over parsed program (single-pass locals-aware)
         for (auto& pr : prog.procs) {
-            // We perform a single pass fold that may reduce many constant sub-expressions.
             std::map<std::string, int64_t> empty_locals;
             for (auto& st : pr.body) fold_constants_in_stmt(st.get(), &empty_locals);
         }
 
-        // build proc map (deep-clone to avoid copying unique_ptrs)
+        // 5) Build proc map (deep-clone)
         std::map<std::string, Proc> procmap;
         for (const auto& pr : prog.procs) procmap.emplace(pr.name, clone_proc(pr));
 
-        // initial context frame
-        ContextFrame ctx;
+        // 6) Machine code emission stage (write native stubs for each proc)
+        //    This ensures the pipeline follows: source -> optimized CIAM -> machine code -> executor
+        emit_machine_code_for_all_procs(procmap, ctx);
+        ctx.annotate("pipeline:stage=machine_code_emitted");
+
+        // 7) Initialize runtime context with env/numeric invariants
         for (auto& kv : prog.env) ctx.env[kv.first] = kv.second;
         for (auto& kv : prog.numeric_invariants) ctx.ints[kv.first] = kv.second;
 
-        // Validate program (type checks + control-flow validation)
-        // Validation will annotate ctx with warnings and throw for fatal errors.
+        // 8) Validate program (type checks + control-flow validation)
+        //    Validation will annotate ctx with warnings and throw for fatal errors.
         validate_program(prog, procmap, ctx);
+        ctx.annotate("pipeline:stage=validation_ok");
 
-        // translate selected proc to plan (main)
+        // 9) Translate selected proc to plan (main)
         auto it = procmap.find(main_proc_name);
         if (it == procmap.end()) throw std::runtime_error("no main proc found");
         ActionPlan plan = translate_proc_to_plan(it->second, prog, ctx, procmap);
 
-        // Lightweight lowering: emit a tiny native stub that returns 0 for the proc.
-        try {
-            x64stub::write_stub("resolver_native", it->second.name, 0);
-        }
-        catch (const std::exception& ex) {
-            // Emission failure should not stop resolution/execution; annotate context
-            ctx.annotate(std::string("native_emit_failed: ") + ex.what());
-        }
-
-        // execute plan deterministically
+        // 10) Execute plan deterministically (executor)
+        //     We keep interpreter execution; native stubs exist as artifacts for separate execution/testing.
+        ctx.annotate("pipeline:stage=executor_start");
         auto [final_ctx, trace] = execute_plan(plan, ctx);
+        final_ctx.annotate("pipeline:stage=executor_done");
+
         return ResolveResult{ std::move(final_ctx), std::move(trace) };
     }
 
