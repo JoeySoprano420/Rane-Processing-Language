@@ -170,6 +170,8 @@ namespace resolver {
             if (c == '"' || c == '\'') {
                 char q = getch();
                 bool isChar = (q == '\'');
+
+                // Multi-line string support: allow end-of-file as a terminator
                 while (peek() && peek() != q) {
                     char ch = getch();
                     if (ch == '\\' && peek()) { t.lexeme.push_back(ch); t.lexeme.push_back(getch()); }
@@ -786,6 +788,126 @@ namespace resolver {
         if (s->mmio_offset) fold_constants_in_expr(s->mmio_offset.get(), locals);
         if (s->mmio_value) fold_constants_in_expr(s->mmio_value.get(), locals);
         if (s->cond) fold_constants_in_expr(s->cond.get(), locals);
+    }
+
+    // ----------------------------- Static analysis: type & control checks ----
+    // Adds validation pass that reports errors (throws) and warnings (annotates ctx).
+    // - duplicate labels
+    // - missing goto targets
+    // - division/modulo by zero when statically provable
+    // - out-of-range shift amounts when statically provable
+    // - missing mmio reg or offsets
+    // - unknown identifiers (warning)
+    // - unknown call targets (warning)
+
+    static void collect_idents_in_expr(const Expr* e, std::set<std::string>& out) {
+        if (!e) return;
+        if (e->kind == Expr::Ident) out.insert(e->text);
+        for (const auto& a : e->args) collect_idents_in_expr(a.get(), out);
+        if (e->cond) collect_idents_in_expr(e->cond.get(), out);
+    }
+
+    static void validate_program(const Program& prog, const std::map<std::string, Proc>& procmap, ContextFrame& ctx) {
+        // For each proc, perform checks
+        for (const auto& pr : prog.procs) {
+            std::ostringstream errs;
+            std::vector<std::string> warns;
+            std::set<std::string> labels;
+            std::set<std::string> dup_labels;
+            // collect labels first
+            for (const auto& stptr : pr.body) {
+                if (!stptr) continue;
+                if (stptr->kind == Stmt::Label) {
+                    if (stptr->name.empty()) {
+                        // anonymous label is allowed but not useful; warn
+                        warns.push_back(pr.name + ": anonymous label encountered");
+                    } else {
+                        if (labels.count(stptr->name)) dup_labels.insert(stptr->name);
+                        labels.insert(stptr->name);
+                    }
+                }
+            }
+            if (!dup_labels.empty()) {
+                for (const auto& d : dup_labels) errs << pr.name << ": duplicate label '" << d << "'\n";
+            }
+
+            // Known locals tracking (params + lets encountered in order)
+            std::set<std::string> known_locals(pr.params.begin(), pr.params.end());
+            // Walk statements to check gotos and statically-check exprs
+            for (const auto& stptr : pr.body) {
+                if (!stptr) continue;
+                // Check stmt-specific invariants
+                if (stptr->kind == Stmt::Goto) {
+                    // check that true/false labels exist
+                    if (!stptr->true_label.empty() && labels.count(stptr->true_label) == 0) {
+                        errs << pr.name << ": goto true-target '" << stptr->true_label << "' not found\n";
+                    }
+                    if (!stptr->false_label.empty() && labels.count(stptr->false_label) == 0) {
+                        errs << pr.name << ": goto false-target '" << stptr->false_label << "' not found\n";
+                    }
+                }
+                if (stptr->kind == Stmt::Read32 || stptr->kind == Stmt::Write32) {
+                    if (stptr->mmio_reg.empty()) {
+                        errs << pr.name << ": mmio operation without register identifier\n";
+                    }
+                    if (!stptr->mmio_offset) {
+                        errs << pr.name << ": mmio operation without offset expression\n";
+                    }
+                }
+                if (stptr->kind == Stmt::Let) {
+                    // let introduces new local after parsing its expr
+                    // check expr for constant divide/mod by zero and shift validity
+                    if (stptr->expr) {
+                        // divide/mod static zero
+                        if (stptr->expr->kind == Expr::Binary) {
+                            const Expr* be = stptr->expr.get();
+                            if ((be->op == "/" || be->op == "%") && be->args.size() >= 2) {
+                                auto rv = eval_constant_expr(be->args[1].get(), nullptr);
+                                if (rv && *rv == 0) errs << pr.name << ": let '" << stptr->name << "' divides/mods by zero statically\n";
+                            }
+                            if ((be->op == "<<" || be->op == ">>") && be->args.size() >= 2) {
+                                auto rv = eval_constant_expr(be->args[1].get(), nullptr);
+                                if (rv) {
+                                    if (*rv < 0 || *rv >= 64) errs << pr.name << ": let '" << stptr->name << "' shift amount out of range\n";
+                                }
+                            }
+                        }
+                    }
+                    known_locals.insert(stptr->name);
+                }
+                // For any expr in stmt, collect idents and warn if not known
+                std::set<std::string> idents;
+                if (stptr->expr) collect_idents_in_expr(stptr->expr.get(), idents);
+                if (stptr->cond) collect_idents_in_expr(stptr->cond.get(), idents);
+                if (stptr->mmio_offset) collect_idents_in_expr(stptr->mmio_offset.get(), idents);
+                if (stptr->mmio_value) collect_idents_in_expr(stptr->mmio_value.get(), idents);
+
+                for (const auto& id : idents) {
+                    if (known_locals.count(id) == 0 &&
+                        prog.numeric_invariants.count(id) == 0) {
+                        // not a local or known numeric invariant; warn
+                        warns.push_back(pr.name + ": use of possibly-undefined identifier '" + id + "'");
+                    }
+                }
+
+                // For call expressions, warn if target unknown (and not builtin)
+                if (stptr->expr && stptr->expr->kind == Expr::Call) {
+                    const std::string& callee = stptr->expr->text;
+                    bool is_builtin = (callee == "print" || callee == "addr" || callee == "load" || callee == "store" ||
+                        callee == "choose_max" || callee == "choose_min" || callee == "load" || callee == "store");
+                    if (!is_builtin && procmap.count(callee) == 0) {
+                        warns.push_back(pr.name + ": call to unknown function '" + callee + "'");
+                    }
+                }
+            }
+
+            // Emit warnings to ctx (non-fatal) and collect errors
+            for (const auto& w : warns) ctx.annotate(std::string("validate:warn: ") + w);
+            std::string es = errs.str();
+            if (!es.empty()) {
+                throw std::runtime_error(std::string("validation failed for proc '") + pr.name + "':\n" + es);
+            }
+        }
     }
 
     // ----------------------------- Expr evaluator used by actions ------------
@@ -1433,6 +1555,10 @@ namespace resolver {
         ContextFrame ctx;
         for (auto& kv : prog.env) ctx.env[kv.first] = kv.second;
         for (auto& kv : prog.numeric_invariants) ctx.ints[kv.first] = kv.second;
+
+        // Validate program (type checks + control-flow validation)
+        // Validation will annotate ctx with warnings and throw for fatal errors.
+        validate_program(prog, procmap, ctx);
 
         // translate selected proc to plan (main)
         auto it = procmap.find(main_proc_name);
