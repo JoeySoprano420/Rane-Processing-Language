@@ -660,7 +660,136 @@ namespace resolver {
         void append(Action&& a) { actions.push_back(std::move(a)); }
     };
 
-    // Expr evaluator used by actions - deterministic evaluation with simple types (ints & strings)
+    // ----------------------------- Constant-folding helpers -------------------
+    // New: perform basic constant folding on AST nodes prior to translation.
+    // This reduces runtime work and enables translation-time optimizations.
+
+    static std::optional<int64_t> parse_int_literal_text(const std::string& s) {
+        if (s.empty()) return std::nullopt;
+        std::string t; for (char c : s) if (c != '_') t.push_back(c);
+        try {
+            if (t.size() > 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) return (int64_t)std::stoll(t, nullptr, 0);
+            if (t.size() > 2 && t[0] == '0' && (t[1] == 'b' || t[1] == 'B')) return (int64_t)std::stoll(t.substr(2), nullptr, 2);
+            return (int64_t)std::stoll(t, nullptr, 10);
+        }
+        catch (...) { return std::nullopt; }
+    }
+
+    // Evaluate an expression as a constant if possible. Uses locals for ident resolution.
+    static std::optional<int64_t> eval_constant_expr(const Expr* e, const std::map<std::string, int64_t>* locals = nullptr) {
+        if (!e) return std::nullopt;
+        switch (e->kind) {
+        case Expr::IntLit: return parse_int_literal_text(e->text);
+        case Expr::BoolLit: return (e->text == "true") ? 1 : 0;
+        case Expr::NullLit: return 0;
+        case Expr::Ident:
+            if (locals) {
+                auto it = locals->find(e->text);
+                if (it != locals->end()) return it->second;
+            }
+            return std::nullopt;
+        case Expr::Unary: {
+            auto a = eval_constant_expr(e->args[0].get(), locals);
+            if (!a) return std::nullopt;
+            if (e->op == "-") return -*a;
+            if (e->op == "!") return (*a == 0) ? 1 : 0;
+            if (e->op == "~") return ~(*a);
+            return std::nullopt;
+        }
+        case Expr::Binary: {
+            auto a = eval_constant_expr(e->args[0].get(), locals);
+            auto b = eval_constant_expr(e->args[1].get(), locals);
+            if (!a || !b) return std::nullopt;
+            int64_t A = *a, B = *b;
+
+            if (e->op == "+") return A + B;
+            if (e->op == "-") return A - B;
+            if (e->op == "*") return A * B;
+            // Fix: return std::optional<int64_t> explicitly for division/mod to avoid type mismatch
+            if (e->op == "/") return (B != 0) ? std::optional<int64_t>(A / B) : std::nullopt;
+            if (e->op == "%") return (B != 0) ? std::optional<int64_t>(A % B) : std::nullopt;
+            if (e->op == "&") return A & B;
+            if (e->op == "|") return A | B;
+            if (e->op == "^") return A ^ B;
+
+            // Safe shift handling: require RHS in [0,63] and use unsigned shift for LHS where appropriate.
+            if (e->op == "<<") {
+                if (B < 0 || B >= 64) return std::nullopt;
+                return static_cast<int64_t>(static_cast<uint64_t>(A) << static_cast<unsigned>(B));
+            }
+            if (e->op == ">>") {
+                if (B < 0 || B >= 64) return std::nullopt;
+                // Arithmetic right shift: preserve sign
+                return (A >> static_cast<unsigned>(B));
+            }
+
+            if (e->op == "==") return (A == B) ? 1 : 0;
+            if (e->op == "!=") return (A != B) ? 1 : 0;
+            if (e->op == "<") return (A < B) ? 1 : 0;
+            if (e->op == "<=") return (A <= B) ? 1 : 0;
+            if (e->op == ">") return (A > B) ? 1 : 0;
+            if (e->op == ">=") return (A >= B) ? 1 : 0;
+            if (e->op == "&&") return (A && B) ? 1 : 0;
+            if (e->op == "||") return (A || B) ? 1 : 0;
+            return std::nullopt;
+        }
+        case Expr::Call: {
+            // fold some builtins: choose_max/min and addr for constant args
+            if (e->text == "choose_max" || e->text == "choose_min") {
+                if (e->args.size() >= 2) {
+                    auto a = eval_constant_expr(e->args[0].get(), locals);
+                    auto b = eval_constant_expr(e->args[1].get(), locals);
+                    if (!a || !b) return std::nullopt;
+                    if (e->text == "choose_max") return (*a > *b) ? *a : *b;
+                    return (*a < *b) ? *a : *b;
+                }
+                return std::nullopt;
+            }
+            if (e->text == "addr") {
+                int64_t acc = 0;
+                for (auto& a : e->args) {
+                    auto v = eval_constant_expr(a.get(), locals);
+                    if (!v) return std::nullopt;
+                    acc = acc * 31 + *v;
+                }
+                return acc;
+            }
+            return std::nullopt;
+        }
+        default:
+            return std::nullopt;
+        }
+        return std::nullopt;
+    }
+
+    // Replace expression node with a folded constant when possible.
+    static bool fold_constants_in_expr(Expr* e, const std::map<std::string, int64_t>* locals = nullptr) {
+        if (!e) return false;
+        // recurse first
+        for (auto& a : e->args) fold_constants_in_expr(a.get(), locals);
+        if (e->cond) fold_constants_in_expr(e->cond.get(), locals);
+        auto v = eval_constant_expr(e, locals);
+        if (v) {
+            e->kind = Expr::IntLit;
+            e->text = std::to_string(*v);
+            e->op.clear();
+            e->args.clear();
+            e->cond.reset();
+            return true;
+        }
+        return false;
+    }
+
+    static void fold_constants_in_stmt(Stmt* s, const std::map<std::string, int64_t>* locals = nullptr) {
+        if (!s) return;
+        if (s->expr) fold_constants_in_expr(s->expr.get(), locals);
+        if (s->mmio_offset) fold_constants_in_expr(s->mmio_offset.get(), locals);
+        if (s->mmio_value) fold_constants_in_expr(s->mmio_value.get(), locals);
+        if (s->cond) fold_constants_in_expr(s->cond.get(), locals);
+    }
+
+    // ----------------------------- Expr evaluator used by actions ------------
+    // (unchanged behavior - deterministic evaluation with simple types (ints & strings))
     struct EvalContext {
         ContextFrame* ctx = nullptr;
         std::map<std::string, int64_t>* locals = nullptr;
@@ -711,8 +840,17 @@ namespace resolver {
                 if (e->op == "&") return a & b;
                 if (e->op == "|") return a | b;
                 if (e->op == "^") return a ^ b;
-                if (e->op == "<<") return a << b;
-                if (e->op == ">>") return a >> b;
+                if (e->op == "<<") {
+                    // Guard RHS and perform unsigned left shift to avoid UB and MSVC diagnostics
+                    if (b < 0 || b >= 64) return 0;
+                    return static_cast<int64_t>(static_cast<uint64_t>(a) << static_cast<unsigned>(b));
+                }
+                if (e->op == ">>") {
+                    // Guard RHS; arithmetic right shift on signed type is implementation-defined
+                    // but on two's complement targets we preserve sign semantics via signed right shift.
+                    if (b < 0 || b >= 64) return 0;
+                    return (a >> static_cast<unsigned>(b));
+                }
                 if (e->op == "==") return (a == b) ? 1 : 0;
                 if (e->op == "!=") return (a != b) ? 1 : 0;
                 if (e->op == "<") return (a < b) ? 1 : 0;
@@ -896,6 +1034,13 @@ namespace resolver {
 
     // ----------------------------- Translator -> ActionPlan --------------------
 
+    // Extended capabilities & optimizations implemented below:
+    //  - constant folding on AST before translation
+    //  - let-folding: if let RHS is constant with known locals, initialize locals at translate-time and omit runtime let
+    //  - read32/write32 offset/value precomputation when offsets/values are constant
+    //  - expr pre-evaluation (when fully constant) to avoid runtime evaluation
+    //  - annotations to make trace more informative
+
     static ActionPlan translate_proc_to_plan(
         const Proc& proc,
         Program& /*P*/,
@@ -904,6 +1049,12 @@ namespace resolver {
     ) {
         ActionPlan plan;
         auto locals_ptr = std::make_shared<std::map<std::string, int64_t>>();
+
+        // Pre-fold constants inside procedure body using currently-known locals (none initially).
+        // Note: we perform a quick fold pass; deeper multi-pass folding could be added.
+        for (auto& st : proc.body) {
+            fold_constants_in_stmt(st.get(), locals_ptr.get());
+        }
 
         for (size_t si = 0; si < proc.body.size(); ++si) {
             auto& st = proc.body[si];
@@ -924,6 +1075,22 @@ namespace resolver {
             }
 
             if (st->kind == Stmt::Let) {
+                // Try to fold let at translation time using locals known so far.
+                auto pre = eval_constant_expr(st->expr.get(), locals_ptr.get());
+                if (pre) {
+                    // Initialize local immediately and skip runtime emission.
+                    (*locals_ptr)[st->name] = *pre;
+                    // annotate plan with a synthetic action that records folding
+                    Action a;
+                    a.name = proc.name + "::let-folded " + st->name;
+                    a.impl = [name = st->name, val = *pre](ContextFrame& ctx) -> std::optional<size_t> {
+                        ctx.annotate("let-folded " + name + " = " + std::to_string(val));
+                        return std::nullopt;
+                    };
+                    plan.append(std::move(a));
+                    continue;
+                }
+
                 Action a;
                 a.name = proc.name + "::let " + st->name;
                 a.impl = [e = st->expr.get(), locals_ptr, name = st->name, &procmap, action_name = a.name]
@@ -939,6 +1106,19 @@ namespace resolver {
             }
 
             if (st->kind == Stmt::ExprStmt || st->kind == Stmt::CallStmt) {
+                // Try to pre-evaluate expression at translate-time if fully constant.
+                auto pre = eval_constant_expr(st->expr.get(), locals_ptr.get());
+                if (pre) {
+                    Action a;
+                    a.name = proc.name + "::expr(const)"; 
+                    a.impl = [v = *pre](ContextFrame& ctx) -> std::optional<size_t> {
+                        ctx.annotate("expr_const -> " + std::to_string(v));
+                        return std::nullopt;
+                    };
+                    plan.append(std::move(a));
+                    continue;
+                }
+
                 Action a;
                 a.name = proc.name + "::expr";
                 a.impl = [e = st->expr.get(), locals_ptr, &procmap](ContextFrame& ctx) -> std::optional<size_t> {
@@ -951,6 +1131,21 @@ namespace resolver {
             }
 
             if (st->kind == Stmt::Return) {
+                // Try to fold return expr if possible
+                auto pre = eval_constant_expr(st->expr.get(), locals_ptr.get());
+                if (pre) {
+                    Action a;
+                    a.name = proc.name + "::return(const)";
+                    a.impl = [v = *pre](ContextFrame& ctx) -> std::optional<size_t> {
+                        ctx.return_value = v;
+                        ctx.annotate("return " + std::to_string(v));
+                        ctx.stop = true;
+                        return std::nullopt;
+                    };
+                    plan.append(std::move(a));
+                    continue;
+                }
+
                 Action a;
                 a.name = proc.name + "::return";
                 a.impl = [e = st->expr.get(), locals_ptr, &procmap](ContextFrame& ctx) -> std::optional<size_t> {
@@ -990,71 +1185,139 @@ namespace resolver {
             }
 
             if (st->kind == Stmt::Read32) {
+                // If mmio_offset folds to constant, capture it at translation time for faster runtime.
+                auto off_const = eval_constant_expr(st->mmio_offset.get(), locals_ptr.get());
                 Action a;
                 a.name = proc.name + "::read32 " + st->mmio_reg;
-                a.impl = [reg = st->mmio_reg,
-                    offE = st->mmio_offset.get(),
-                    dst = st->name,
-                    locals_ptr, &procmap, &plan](ContextFrame& ctx) -> std::optional<size_t> {
-                    EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
-                    int64_t byte_off = ev.eval_expr(offE);
-
+                if (off_const) {
+                    int64_t byte_off = *off_const;
                     if (!mmio_is_aligned4(byte_off)) {
-                        if (!ctx.mmio_auto_normalize) {
-                            mmio_trap(ctx, 1001, "read32 misaligned byte_offset=" + std::to_string(byte_off) + " reg=" + reg);
+                        // Keep runtime behavior but annotate
+                        a.impl = [reg = st->mmio_reg, byte_off, dst = st->name](ContextFrame& ctx) -> std::optional<size_t> {
+                            ctx.annotate("read32(precomputed_offset) misaligned " + reg + " off=" + std::to_string(byte_off));
+                            // follow original behavior: trap unless mmio_auto_normalize
+                            if (!ctx.mmio_auto_normalize) {
+                                mmio_trap(ctx, 1001, "read32 misaligned byte_offset=" + std::to_string(byte_off) + " reg=" + reg);
+                                return std::nullopt;
+                            }
+                            int64_t norm = (byte_off >= 0) ? (byte_off & ~3LL) : -(((-byte_off) + 3) & ~3LL);
+                            int64_t w = mmio_word_index(norm);
+                            const std::string key = mmio_word_key(reg, w);
+                            ctx.annotate("read32_normalize " + reg + " off=" + std::to_string(byte_off) + " -> " + std::to_string(norm));
+                            ctx.annotate("read32 " + reg + " byte_off=" + std::to_string(norm) +
+                                " word=" + std::to_string(w));
                             return std::nullopt;
-                        }
-                        int64_t norm = (byte_off >= 0) ? (byte_off & ~3LL) : -(((-byte_off) + 3) & ~3LL);
-                        ctx.annotate("mmio_normalize " + std::to_string(byte_off) + " -> " + std::to_string(norm));
-                        byte_off = norm;
+
+                        };
+                    } else {
+                        int64_t w = mmio_word_index(byte_off);
+                        const std::string key = mmio_word_key(st->mmio_reg, w);
+                        a.impl = [key, dst = st->name](ContextFrame& ctx) -> std::optional<size_t> {
+                            auto it = ctx.env.find(key);
+                            const std::string raw = (it != ctx.env.end()) ? it->second : "0";
+                            int64_t val = parse_i64_fallback(raw, 0);
+                            ctx.ints[dst] = val;
+                            ctx.annotate("read32_const_key " + key + " -> " + dst + " = " + std::to_string(val));
+                            return std::nullopt;
+                        };
                     }
+                } else {
+                    // fallback to runtime-evaluated offset
+                    a.impl = [reg = st->mmio_reg,
+                        offE = st->mmio_offset.get(),
+                        dst = st->name,
+                        locals_ptr, &procmap, &plan](ContextFrame& ctx) -> std::optional<size_t> {
+                        EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
+                        int64_t byte_off = ev.eval_expr(offE);
 
-                    int64_t w = mmio_word_index(byte_off);
-                    const std::string key = mmio_word_key(reg, w);
+                        if (!mmio_is_aligned4(byte_off)) {
+                            if (!ctx.mmio_auto_normalize) {
+                                mmio_trap(ctx, 1001, "read32 misaligned byte_offset=" + std::to_string(byte_off) + " reg=" + reg);
+                                return std::nullopt;
+                            }
+                            int64_t norm = (byte_off >= 0) ? (byte_off & ~3LL) : -(((-byte_off) + 3) & ~3LL);
+                            ctx.annotate("mmio_normalize " + std::to_string(byte_off) + " -> " + std::to_string(norm));
+                            byte_off = norm;
+                        }
 
-                    auto it = ctx.env.find(key);
-                    const std::string raw = (it != ctx.env.end()) ? it->second : "0";
-                    int64_t val = parse_i64_fallback(raw, 0);
+                        int64_t w = mmio_word_index(byte_off);
+                        const std::string key = mmio_word_key(reg, w);
 
-                    ctx.ints[dst] = val;
-                    ctx.annotate("read32 " + reg + " byte_off=" + std::to_string(byte_off) +
-                        " word=" + std::to_string(w) + " -> " + dst + " = " + std::to_string(val));
-                    return std::nullopt;
-                    };
+                        auto it = ctx.env.find(key);
+                        const std::string raw = (it != ctx.env.end()) ? it->second : "0";
+                        int64_t val = parse_i64_fallback(raw, 0);
+
+                        ctx.ints[dst] = val;
+                        ctx.annotate("read32 " + reg + " byte_off=" + std::to_string(byte_off) +
+                            " word=" + std::to_string(w) + " -> " + dst + " = " + std::to_string(val));
+                        return std::nullopt;
+                        };
+                }
                 plan.append(std::move(a));
                 continue;
             }
 
             if (st->kind == Stmt::Write32) {
+                // If mmio_offset and mmio_value fold to constants, capture at translation-time
+                auto off_const = eval_constant_expr(st->mmio_offset.get(), locals_ptr.get());
+                auto val_const = eval_constant_expr(st->mmio_value.get(), locals_ptr.get());
                 Action a;
                 a.name = proc.name + "::write32 " + st->mmio_reg;
-                a.impl = [reg = st->mmio_reg,
-                    offE = st->mmio_offset.get(),
-                    valE = st->mmio_value.get(),
-                    locals_ptr, &procmap, &plan](ContextFrame& ctx) -> std::optional<size_t> {
-                    EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
-                    int64_t byte_off = ev.eval_expr(offE);
-
+                if (off_const && val_const) {
+                    int64_t byte_off = *off_const;
+                    int64_t value = *val_const;
                     if (!mmio_is_aligned4(byte_off)) {
-                        if (!ctx.mmio_auto_normalize) {
-                            mmio_trap(ctx, 1002, "write32 misaligned byte_offset=" + std::to_string(byte_off) + " reg=" + reg);
+                        a.impl = [reg = st->mmio_reg, byte_off, value](ContextFrame& ctx) -> std::optional<size_t> {
+                            ctx.annotate("write32(precomputed_offset) misaligned " + reg + " off=" + std::to_string(byte_off));
+                            if (!ctx.mmio_auto_normalize) {
+                                mmio_trap(ctx, 1002, "write32 misaligned byte_offset=" + std::to_string(byte_off) + " reg=" + reg);
+                                return std::nullopt;
+                            }
+                            int64_t norm = (byte_off >= 0) ? (byte_off & ~3LL) : -(((-byte_off) + 3) & ~3LL);
+                            int64_t w = mmio_word_index(norm);
+                            const std::string key = mmio_word_key(reg, w);
+                            ctx.env[key] = std::to_string(value);
+                            ctx.annotate("write32_const " + key + " = " + std::to_string(value));
                             return std::nullopt;
-                        }
-                        int64_t norm = (byte_off >= 0) ? (byte_off & ~3LL) : -(((-byte_off) + 3) & ~3LL);
-                        ctx.annotate("mmio_normalize " + std::to_string(byte_off) + " -> " + std::to_string(norm));
-                        byte_off = norm;
+                        };
+                    } else {
+                        int64_t w = mmio_word_index(byte_off);
+                        const std::string key = mmio_word_key(st->mmio_reg, w);
+                        a.impl = [key, value](ContextFrame& ctx) -> std::optional<size_t> {
+                            ctx.env[key] = std::to_string(value);
+                            ctx.annotate("write32_const " + key + " = " + std::to_string(value));
+                            return std::nullopt;
+                        };
                     }
+                } else {
+                    a.impl = [reg = st->mmio_reg,
+                        offE = st->mmio_offset.get(),
+                        valE = st->mmio_value.get(),
+                        locals_ptr, &procmap, &plan](ContextFrame& ctx) -> std::optional<size_t> {
+                        EvalContext ev{ &ctx, locals_ptr.get(), &procmap };
+                        int64_t byte_off = ev.eval_expr(offE);
 
-                    int64_t w = mmio_word_index(byte_off);
-                    int64_t value = ev.eval_expr(valE);
+                        if (!mmio_is_aligned4(byte_off)) {
+                            if (!ctx.mmio_auto_normalize) {
+                                mmio_trap(ctx, 1002, "write32 misaligned byte_offset=" + std::to_string(byte_off) + " reg=" + reg);
+                                return std::nullopt;
+                            }
+                            int64_t norm = (byte_off >= 0) ? (byte_off & ~3LL) : -(((-byte_off) + 3) & ~3LL);
+                            ctx.annotate("mmio_normalize " + std::to_string(byte_off) + " -> " + std::to_string(norm));
+                            byte_off = norm;
+                        }
 
-                    const std::string key = mmio_word_key(reg, w);
-                    ctx.env[key] = std::to_string(value);
+                        int64_t w = mmio_word_index(byte_off);
+                        int64_t value = ev.eval_expr(valE);
 
-                    ctx.annotate("write32 " + reg + " byte_off=" + std::to_string(byte_off) +
-                        " word=" + std::to_string(w) + " = " + std::to_string(value));
-                    return std::nullopt;
-                    };
+                        const std::string key = mmio_word_key(reg, w);
+                        ctx.env[key] = std::to_string(value);
+
+                        ctx.annotate("write32 " + reg + " byte_off=" + std::to_string(byte_off) +
+                            " word=" + std::to_string(w) + " = " + std::to_string(value));
+                        return std::nullopt;
+                        };
+                }
                 plan.append(std::move(a));
                 continue;
             }
@@ -1088,6 +1351,11 @@ namespace resolver {
             a.impl = [](ContextFrame&) -> std::optional<size_t> { return std::nullopt; };
             plan.append(std::move(a));
         }
+
+        // Post-translation optimization point:
+        // - We could resolve goto targets into direct ips here and patch lambdas,
+        //   but current goto lambdas reference plan.label_to_ip and are efficient.
+        // - Additional passes can be added to remove redundant no-ops, merge adjacent annotations, etc.
 
         return plan;
     }
@@ -1150,6 +1418,13 @@ namespace resolver {
         Parser P(std::move(toks));
         Program prog = P.parse_program();
 
+        // Run a constant-folding pass over the parsed program (simple, non-recursive locals-aware pass).
+        for (auto& pr : prog.procs) {
+            // We perform a single pass fold that may reduce many constant sub-expressions.
+            std::map<std::string, int64_t> empty_locals;
+            for (auto& st : pr.body) fold_constants_in_stmt(st.get(), &empty_locals);
+        }
+
         // build proc map (deep-clone to avoid copying unique_ptrs)
         std::map<std::string, Proc> procmap;
         for (const auto& pr : prog.procs) procmap.emplace(pr.name, clone_proc(pr));
@@ -1208,3 +1483,4 @@ int main(int argc, char** argv) {
 // To build and run the test harness, define RESOLVER_MAIN_TEST in the project settings
 // or compile with -DRESOLVER_MAIN_TEST and run the produced binary. The resolver will
 // attempt to load `syntax.rane` (or path provided as argv[1]) and execute `proc main()`.
+
