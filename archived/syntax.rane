@@ -3,6 +3,8 @@
 // As of 01_12_2026
 // Goal: exercise ALL language tiers end-to-end: lexer → parser → typecheck → CIAM → IR → codegen → executor.
 
+Format the block-structured syntax style into a sugary abstraction-heavy
+
 ///////////////////////////////////////////////////////////////////////////
 // 0) Imports / modules / namespaces / visibility
 ///////////////////////////////////////////////////////////////////////////
