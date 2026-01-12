@@ -1,0 +1,410 @@
+CIAM LOWERING RULE TABLE (SUGAR → CANONICAL → IR TEMPLATES)
+Version: CIAM_RULESET_v1
+Date: 01_12_2026
+Scope: syntax_sugar.rane → syntax.ciam.rane → syntax.opt.ciam.ir
+Guarantees (all rules):
+  - Deterministic expansion (no hidden allocations, no hidden scheduling)
+  - Capability enforcement (rule fails if required capability not satisfied)
+  - Invariant preservation (rule must not weaken contracts/asserts/guards)
+  - Expansion is total for the “coverage suite” (no “best effort”)
+
+Legend:
+  Surface Pattern    = what you write
+  Canonical Output   = de-sugared RANE surface
+  IR Template        = CIAM IR pattern (simplified)
+  Requires           = capability/effect needed
+  Emits Metadata     = executor bindings (guards/tracepoints/io policy)
+  Notes              = determinism / perf / safety constraints
+
+──────────────────────────────────────────────────────────────────────────────
+PASS 0 — INTENTGRAPH BUILD (Structural)
+──────────────────────────────────────────────────────────────────────────────
+Rule IG0: INDENT-BLOCK NORMALIZATION
+Surface Pattern:
+  <headline>
+    <indented statements...>
+  end
+Canonical Output:
+  <headline> { <statements...> }
+IR Template:
+  (no semantic change; block nodes get stable ids)
+Requires: none
+Emits Metadata: none
+Notes:
+  - assigns stable BlockId for later metadata anchoring
+
+Rule IG1: VERB-CALL CANONICALIZATION
+Surface Pattern:
+  print x
+  f.read
+  vec.len
+Canonical Output:
+  print(x);
+  f.read();
+  vec.len();
+IR Template:
+  call print(x)
+  call f.read()
+  call vec.len()
+Requires: none
+Emits Metadata: none
+Notes:
+  - purely syntactic; no behavior change
+
+──────────────────────────────────────────────────────────────────────────────
+PASS 1 — DESUGAR CORE RESOURCE / CONTROL VERBS
+──────────────────────────────────────────────────────────────────────────────
+Rule D0: WITH-RESOURCE → ACQUIRE + TRY/FINALLY + RELEASE
+Surface Pattern:
+  with open(path) as f:
+    BODY
+  end
+Canonical Output:
+  let f = open(path);
+  try { BODY } finally { close(f); }
+IR Template:
+  %f = call open(path)
+  guard_begin kind=resource scope=%f id=R#
+  <BODY>
+  call close(%f)
+  guard_end id=R#
+Requires: file_io (because open/close are file surface)
+Emits Metadata:
+  - guard R# kind=resource_acquire enforcement=must_close
+  - tracepoints (optional): file_open, file_close
+Notes:
+  - deterministic lifetime even across throw/trap paths
+  - “close” must be non-throwing or be translated into trap-on-failure policy
+
+Rule D1: DEFER stmt → TRY/FINALLY
+Surface Pattern:
+  defer CLEANUP
+  BODY
+Canonical Output:
+  try { BODY } finally { CLEANUP; }
+IR Template:
+  guard_begin kind=defer id=D#
+  <BODY>
+  <CLEANUP>
+  guard_end id=D#
+Requires: none (capabilities come from operations in CLEANUP)
+Emits Metadata:
+  - guard D# kind=defer_cleanup enforcement=must_run
+Notes:
+  - multiple defers become a LIFO stack (see Rule D1b)
+
+Rule D1b: MULTI-DEFER STACKING (LIFO)
+Surface Pattern:
+  defer A
+  defer B
+  BODY
+Canonical Output:
+  try { BODY } finally { B; A; }
+IR Template:
+  (nested guards D#)
+Requires: none
+Emits Metadata: guards for each defer
+Notes:
+  - explicit ordering; diffable output
+
+Rule D2: LOCK m: BODY → LOCK/UNLOCK + FINALLY
+Surface Pattern:
+  lock(m):
+    BODY
+  end
+Canonical Output:
+  rane_rt_threads.mutex_lock(m);
+  try { BODY } finally { rane_rt_threads.mutex_unlock(m); }
+IR Template:
+  guard_begin kind=mutex_lock target=m id=G#
+  call rt.mutex_lock(m)
+  <BODY>
+  call rt.mutex_unlock(m)
+  guard_end id=G#
+Requires: threads
+Emits Metadata:
+  - guard G# kind=mutex_lock enforcement=must_succeed
+Notes:
+  - unlock must be guaranteed (no early returns bypass it)
+  - if lock fails: policy is either retry-deterministic or trap (must be declared)
+
+Rule D3: SPAWN proc(args) → rt.spawn_proc_*(fnptr,args) (typed handle)
+Surface Pattern:
+  let th = spawn spawn_worker 100000
+Canonical Output:
+  let th = rane_rt_threads.spawn_proc(spawn_worker, 100000);
+IR Template:
+  %th = call rt.spawn_proc_i64 spawn_worker 100000
+Requires: threads
+Emits Metadata:
+  - tracepoint kind=spawn anchor=%th
+  - scheduling contract: “deterministic unless relaxed”
+Notes:
+  - CIAM must refuse spawn inside “deterministic_strict” zones unless policy allows
+  - if allowed: spawn points become “determinism boundaries” in metadata
+
+Rule D4: JOIN th → rt.join_* (typed)
+Surface Pattern:
+  let v = join th
+Canonical Output:
+  let v = rane_rt_threads.join_i64(th);
+IR Template:
+  %v = call rt.join_i64 %th
+Requires: threads
+Emits Metadata:
+  - tracepoint kind=join anchor=%v
+Notes:
+  - join ordering is explicit; no implicit waits
+
+Rule D5: MATCH simple integral → SWITCH
+Surface Pattern:
+  match x:
+    case 0: A
+    default: B
+  end
+Canonical Output:
+  switch x { case 0: A; default: B; }
+IR Template:
+  switch_i64 %x { case 0 -> bbA default -> bbB }
+Requires: none
+Emits Metadata: none
+Notes:
+  - if match arms contain capability-gated ops, they carry their own requirements
+
+Rule D6: MATCH variant/sum type → TAG DISPATCH + PAYLOAD BIND
+Surface Pattern:
+  match m1:
+    case Some x: print x
+    case None: print "none"
+  end
+Canonical Output:
+  switch variant_tag(m1) {
+    case TAG_Some: { let x = payload_i64(m1); ... }
+    default: { ... }
+  }
+IR Template:
+  %tag = variant_tag %m1
+  switch_u8 %tag case TAG_SOME -> bbSome default -> bbNone
+  bbSome: %x=i64 = variant_payload_i64 %m1
+Requires: none
+Emits Metadata:
+  - optional tracepoint: match_dispatch (debug-only)
+Notes:
+  - CIAM must guarantee payload extraction is type-correct (no punning)
+
+Rule D7: NODE/PROSE SURFACE → NODE DISPATCHER CFG
+Surface Pattern:
+  node start: ... go to node end_node
+  start at node start
+Canonical Output:
+  proc __node_dispatch(entry: node_id) -> noreturn { ... }
+  proc main() { call __node_dispatch(N_start); }
+IR Template:
+  br on node_id, labels mapped to bb_node_*
+  explicit “halt/trap” mapped to terminators
+Requires: none (capabilities from node bodies)
+Emits Metadata:
+  - tracepoints: node_enter/node_exit (optional)
+Notes:
+  - node labels become stable symbols to support replay/audit traces
+
+──────────────────────────────────────────────────────────────────────────────
+PASS 2 — LOWERING OF “SMART” EXPRESSIONS (NO HIDDEN MEANING)
+──────────────────────────────────────────────────────────────────────────────
+Rule E0: CHOOSE max/min → INTRINSIC CALL
+Surface Pattern:
+  choose max(a,b)
+Canonical Output:
+  rane_rt_math.max_i64(a,b)
+IR Template:
+  %mx = max_i64(a,b)
+Requires: none
+Emits Metadata: none
+Notes:
+  - must be pure; no exceptions; deterministic
+
+Rule E1: IMPLICIT CASTS → EXPLICIT CAST NODES (ONLY ALLOWED SET)
+Surface Pattern:
+  (y0 as i64) or implicit widening
+Canonical Output:
+  cast_i64(y0)
+IR Template:
+  %t = cast_u32_to_i64 %y0
+Requires: none
+Emits Metadata: none
+Notes:
+  - CIAM must reject narrowing unless an explicit “narrow” operator exists
+  - list of permitted casts is part of policy profile
+
+Rule E2: “a = b” equality shorthand → (a == b)
+Surface Pattern:
+  let c6 = a = b
+Canonical Output:
+  let c6 = (a == b)
+IR Template:
+  %c6 = cmp_eq_i64 a b
+Requires: none
+Emits Metadata: none
+Notes:
+  - CIAM must refuse if “=” is in an lvalue context (ambiguity rule)
+
+Rule E3: DOT-ACCESS ON PROPERTIES → CALL/LOAD (depending on entity kind)
+Surface Pattern:
+  vec.len
+Canonical Output:
+  vec.len()
+IR Template:
+  %n = call vec.len()
+Requires: none
+Emits Metadata: none
+Notes:
+  - if len is a field, use field_load; CIAM resolves by type info
+
+──────────────────────────────────────────────────────────────────────────────
+PASS 3 — CAPABILITY & CONTRACT ENFORCEMENT (FAIL FAST)
+──────────────────────────────────────────────────────────────────────────────
+Rule C0: CAPABILITY CHECK ON CALL EDGE
+Surface Pattern:
+  call open(path) inside proc lacking file_io
+Canonical Output:
+  (compile-time error)
+IR Template:
+  diag RANE_DIAG_SECURITY_VIOLATION span=...
+Requires: none (this is the check)
+Emits Metadata: none
+Notes:
+  - errors are deterministic; no “best effort” inference
+
+Rule C1: CONTRACT/ASSERT BINDING → GUARD METADATA
+Surface Pattern:
+  assert(cond,"msg")
+Canonical Output:
+  assert(cond,"msg")
+IR Template:
+  guard_begin kind=assert id=A#
+  br cond -> ok else -> trap(msg or code)
+Requires: none
+Emits Metadata:
+  - guard A# kind=assert enforcement=trap_on_fail
+Notes:
+  - if perf_floor is strict, asserts can be compiled into cold-path traps
+
+Rule C2: DETERMINISM ZONES (OPTIONAL, IF YOU ENABLE THEM)
+Surface Pattern:
+  deterministic:
+    spawn ...
+Canonical Output:
+  (either reject) OR (mark as determinism boundary per policy)
+IR Template:
+  diag or metadata boundary
+Requires: none
+Emits Metadata:
+  - determinism_boundary kind=spawn allowed=true/false
+Notes:
+  - your 98% rule: allow opt-out zones explicitly instead of implicit relaxation
+
+──────────────────────────────────────────────────────────────────────────────
+PASS 4 — OPTIMIZATION (INVARIANT-AWARE, CAP-SAFE)
+──────────────────────────────────────────────────────────────────────────────
+Rule O0: INLINE IDENTITY + PURE INTRINSICS
+Surface Pattern:
+  idv = identity<i64>(sum)
+Canonical Output:
+  idv = sum
+IR Template:
+  %idv = %sum
+Requires: none
+Emits Metadata: none
+Notes:
+  - only if function is proven pure + no contract side effects
+
+Rule O1: DCE THAT DOES NOT REMOVE GUARDS
+Surface Pattern:
+  unused computations around assert/lock/defer
+Canonical Output:
+  remove pure dead ops, keep guards
+IR Template:
+  delete nodes with no uses AND no guard/trace anchors
+Requires: none
+Emits Metadata: preserved anchors
+Notes:
+  - guard anchors are “roots” (cannot be deleted)
+
+Rule O2: CFG SIMPLIFICATION WITHOUT CHANGING TRAP PATHS
+Surface Pattern:
+  branches that fold
+Canonical Output:
+  simplified bb graph
+IR Template:
+  fold br true/false
+Requires: none
+Emits Metadata:
+  - update address/anchor mapping, do not drop trap blocks
+Notes:
+  - trap blocks stay present even if cold (for audit predictability)
+
+──────────────────────────────────────────────────────────────────────────────
+PASS 5 — CODEGEN BINDINGS (METADATA-FIRST)
+──────────────────────────────────────────────────────────────────────────────
+Rule G0: GUARD RANGE ALLOCATION
+Surface Pattern:
+  guard_begin/guard_end in IR
+Canonical Output:
+  (no surface output; affects metadata + code labels)
+IR Template:
+  assign label pairs L_guard_begin, L_guard_end
+Requires: none
+Emits Metadata:
+  - (rva_start, rva_end) populated by PE writer later
+Notes:
+  - executor uses these ranges to supervise without VM
+
+Rule G1: IMPORT WHITELIST ENFORCEMENT
+Surface Pattern:
+  any imported symbol
+Canonical Output:
+  allow/deny based on capability profile
+IR Template:
+  diag if violates allowed import set
+Requires: none
+Emits Metadata:
+  - imports list becomes an executable policy artifact
+Notes:
+  - critical for “off-the-books” syscalls and dynamic eval boundaries
+
+──────────────────────────────────────────────────────────────────────────────
+CIAM “GOLDEN OUTPUT” ARTIFACTS PRODUCED (by rulebook)
+──────────────────────────────────────────────────────────────────────────────
+1) syntax.ciam.rane
+   - deterministic de-sugared canonical surface
+   - stable formatting + explicit control + explicit resource semantics
+
+2) syntax.opt.ciam.ir
+   - diffable optimized IR (guards preserved, capability-safe transforms)
+
+3) syntax.exec.meta
+   - contract map: capabilities, determinism policy, guards, tracepoints, imports,
+     and address_map placeholders (filled post-codegen)
+
+──────────────────────────────────────────────────────────────────────────────
+MINIMUM REQUIRED IMPLEMENTATION SURFACE (so this is executable TODAY)
+──────────────────────────────────────────────────────────────────────────────
+- Frontend:
+  - indent parser + canonical block parser
+  - symbol/type table for structs/enums/variants/unions
+  - capability table + check on call edges
+- CIAM:
+  - rule application engine (pattern → rewrite) with ordering by pass
+  - rule-local “proof obligations” hooks (purity, must-close, must-unlock, etc.)
+- IR:
+  - small typed SSA-ish or block IR with explicit guards + calls + switch + trap/halt
+- Runtime stubs (the minimum set used by rules):
+  - rt.spawn_proc_* / rt.join_* / mutex_lock/unlock
+  - file open/close/read/write
+  - channel send/recv
+  - print primitives
+- Metadata:
+  - guard id allocation + anchor binding
+  - import list extraction
+  - policy profile serialization
+
