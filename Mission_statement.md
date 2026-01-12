@@ -175,37 +175,7 @@ RANE’s resolver architecture is a multi-stage AOT pipeline.
 
 (source → optimized CIAM (Contextual Inference Abstraction Macros) ‑processed expansion → machine code → executor).
 
-Compared to:
-
-(Stage A — Lexing
-
-rane_lexer.cpp: tokenizes identifiers, literals, operators, keywords.
-
-Stage B — Parsing
-
-rane_parser.cpp: builds the AST, enforces grammar rules.
-
-Stage C — Typechecking
-
-Ensures type correctness, correct returns, pointer usage, and capability requirements.
-
-Stage D — Capability checking
-
-Functions declare required capabilities; call sites must satisfy them.
-
-Stage E — TIR (Typed Intermediate Representation)
-
-A typed, SSA-friendly IR used for optimization and backend lowering.
-
-Stage F — SSA construction
-
-Dominance analysis, etc.
-
-Stage G — Register allocation
-
-Linear-scan allocator targeting x64.
-
-Stage H — Backends
+Backends
 
 Native x86-64 backend (rane_x64.cpp): emits machine code, constructs PE64, patches literals, manages imports (e.g., printf).
 
