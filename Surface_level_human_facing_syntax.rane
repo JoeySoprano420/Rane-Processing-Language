@@ -1,0 +1,680 @@
+// syntax_sugar.rane
+// SUGAR-RICH CANONICAL COVERAGE (CIAM-VERIFIED SURFACE)
+// As of 01_12_2026
+// Goal: exercise ALL language tiers end-to-end
+//   source → optimized CIAM-processed expansion → machine code → executor
+//
+// Rule: minimal punctuation; indentation is structure; CIAMs perform lowering
+// Verbs: with defer lock spawn join match are single-word modern verbs
+
+///////////////////////////////////////////////////////////////////////////
+// 0) Imports / modules / namespaces / visibility
+///////////////////////////////////////////////////////////////////////////
+
+import rane_rt_print
+import rane_rt_fs
+import rane_rt_net
+import rane_rt_time
+import rane_rt_threads
+import rane_rt_channels
+import rane_rt_alloc
+import rane_rt_crypto
+
+module demo_root
+
+namespace math:
+  export inline proc square x i64 -> i64:
+    return x * x
+  end
+
+  export inline proc abs_i64 x i64 -> i64:
+    if x < 0:
+      return -x
+    else:
+      return x
+    end
+  end
+
+  private proc hidden -> i32:
+    return 0
+  end
+end
+
+import math::square
+import math::abs_i64
+
+public proc exported_fn -> i32:
+  return 7
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 1) Primitive + composite types
+///////////////////////////////////////////////////////////////////////////
+
+type i8
+type i16
+type i32
+type i64
+type i128
+type i512
+
+type u8
+type u16
+type u32
+type u64
+type u128
+type u512
+
+type f32
+type f64
+type f128
+
+type bool
+type void
+type int
+type string
+
+typealias word = u32
+alias int32 = i32
+
+///////////////////////////////////////////////////////////////////////////
+// 2) Constants / constexpr / constinit / consteval
+///////////////////////////////////////////////////////////////////////////
+
+const PI f64 = 3.141592653589793
+constexpr E f64 = 2.718281828459045
+constinit ZERO i64 = 0
+
+consteval proc const_fn -> i64:
+  return 42
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 3) Attributes / derives (tooling-visible)
+///////////////////////////////////////////////////////////////////////////
+
+@derive Eq Ord Debug
+struct Person:
+  name string
+  age u8
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 4) Enums / variants / unions
+///////////////////////////////////////////////////////////////////////////
+
+enum Flags u8:
+  None = 0
+  Read = 1
+  Write = 2
+  Exec = 4
+  ReadWrite = Read | Write
+end
+
+enum Color i32:
+  Red = 0
+  Green = 1
+  Blue = 2
+end
+
+variant Maybe<T>:
+  Some T
+  None
+end
+
+union IntOrFloat:
+  i i32
+  f f32
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 5) Structs / records / initialization / member access
+///////////////////////////////////////////////////////////////////////////
+
+struct Header:
+  magic u32
+  version u16
+  flags u16
+  size u64
+end
+
+struct Point:
+  x i32
+  y i32
+end
+
+struct Vec3:
+  x i64
+  y i64
+  z i64
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 6) MMIO regions + low-level addr/load/store
+///////////////////////////////////////////////////////////////////////////
+
+mmio region REG from 4096 size 256
+
+///////////////////////////////////////////////////////////////////////////
+// 7) Capabilities / privileges / security qualifiers
+///////////////////////////////////////////////////////////////////////////
+
+capability heap_alloc
+capability file_io
+capability network_io
+capability dynamic_eval
+capability syscalls
+capability threads
+capability channels
+capability crypto
+
+admin proc admin_fn -> i32:
+  return 0
+end
+
+protected proc prot_fn -> i32:
+  return 1
+end
+
+public proc pub_fn -> i32:
+  return 2
+end
+
+private proc priv_fn -> i32:
+  return 3
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 8) Contracts / assertions / invariants
+///////////////////////////////////////////////////////////////////////////
+
+contract positive x i64:
+  ensures x > 0
+end
+
+proc assert_example x i64 -> i64:
+  assert x != 0 "x must be non-zero"
+  return x
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 9) Macros / templates / generics / reflection-like forms
+///////////////////////////////////////////////////////////////////////////
+
+macro SQUARE x = x * x
+
+template T
+proc generic_id x T -> T:
+  return x
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 10) Concurrency primitives: mutex, channels, spawn/join, async/await
+///////////////////////////////////////////////////////////////////////////
+
+mutex m1
+channel<int> ch
+
+async proc async_fetch -> i64 requires network_io:
+  let v i64 = await rane_rt_net.fetch_i64 "https://example"
+  return v
+end
+
+dedicate proc spawn_worker iter i64 -> i64 requires threads:
+  let total i64 = 0
+  for let i i64 = 0; i < iter; i = i + 1:
+    total = total + i
+  end
+  return total
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 11) File IO / resource mgmt: with / defer
+///////////////////////////////////////////////////////////////////////////
+
+proc file_read_example path string -> string requires file_io:
+  with open path as f:
+    let s string = f.read
+    return s
+  end
+end
+
+proc defer_example path string -> i32 requires file_io:
+  let f = open path
+  defer close f
+  write f "hello"
+  return 0
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 12) Inline assembly / registers / syscalls
+///////////////////////////////////////////////////////////////////////////
+
+proc asm_example -> i64 requires syscalls:
+  let out i64 = 0
+  asm:
+    mov rax 1
+    add rax 2
+    mov out rax
+  end
+  return out
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 13) Exceptions: try/catch/finally/throw + trap/halt
+///////////////////////////////////////////////////////////////////////////
+
+proc try_example -> i32:
+  try:
+    throw 100
+  catch e:
+    print e
+  finally:
+    print "done"
+  end
+  return 0
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 14) Dynamic eval (capability gated)
+///////////////////////////////////////////////////////////////////////////
+
+proc eval_example x string -> i64 requires dynamic_eval:
+  let res i64 = eval "10 + " + x
+  print res
+  return res
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 15) CIAM-heavy surface: word-ops, choose, implicit casts, '=' in expr
+///////////////////////////////////////////////////////////////////////////
+
+proc add5 a i64 b i64 c i64 d i64 e i64 -> i64:
+  return a + b + c + d + e
+end
+
+proc identity<T> x T -> T:
+  return x
+end
+
+proc choose_demo a i64 b i64 -> i64:
+  let mx i64 = choose max a b
+  let mn i64 = choose min a b
+  return mx + mn
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 16) Collections: arrays/slices/vectors/tables/tuples + destructuring
+///////////////////////////////////////////////////////////////////////////
+
+proc collection_demo -> i64 requires heap_alloc:
+  let arr [5]i64 = [1 2 3 4 5]
+  let vec = vector 1 2 3
+  let table = map "a" -> 1 "b" -> 2
+
+  let tup = (1 "hi" true)
+  let (x0 i64 x1 string x2 bool) = tup
+
+  print arr[0]
+  print vec.len
+  print table.get "a"
+  print x1
+
+  return x0 + table.get "b"
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 17) Ownership / borrow / linear & nonlinear qualifiers
+///////////////////////////////////////////////////////////////////////////
+
+linear proc lin_inc x i64 -> i64:
+  return x + 1
+end
+
+nonlinear proc nlin_mul x i64 -> i64:
+  return x * 2
+end
+
+proc ownership_example -> i32 requires heap_alloc:
+  let p = allocate i32 4
+  mutate p[0] to 10
+  let q = borrow p
+  print q[0]
+  free p
+  return 0
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 18) Pattern matching: match / decide / switch
+///////////////////////////////////////////////////////////////////////////
+
+proc match_example val i64 -> i32:
+  match val:
+    case 0: print "zero"
+    case 1: print "one"
+    default: print "other"
+  end
+  return 0
+end
+
+proc switch_example x i64 -> i32:
+  switch x:
+    case 0: print "zero"
+    case 1: print "one"
+    default: print "other"
+  end
+  return 0
+end
+
+proc decide_example x i64 -> i32:
+  decide x:
+    case 1: print "one"
+    case 2: print "two"
+    default: print "other"
+  end
+  return 0
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 19) Looping: while / for / hints / unroll / tailcall
+///////////////////////////////////////////////////////////////////////////
+
+proc loop_example -> i64:
+  let i i64 = 0
+  while i < 10:
+    print i
+    i = i + 1
+  end
+  return i
+end
+
+proc for_example -> i64:
+  for let j i64 = 0; j < 5; j = j + 1:
+    print j
+  end
+  return 0
+end
+
+proc loop_unroll_example -> i64:
+  #pragma unroll 4
+  for let i i64 = 0; i < 16; i = i + 1:
+    print i
+  end
+  return 0
+end
+
+proc tail_recursive n i64 acc i64 -> i64:
+  if n == 0:
+    return acc
+  end
+  return tail_recursive n - 1 acc + n
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 20) Diagnostics / pragmas / build directives
+///////////////////////////////////////////////////////////////////////////
+
+#pragma profile "hot"
+inline proc hot_add a i64 b i64 -> i64:
+  return a + b
+end
+
+pragma "optimize" "speed"
+pragma "lto" "on"
+pragma "scheduling" "fair"
+define BUILD_ID 0xDEADBEEF
+
+///////////////////////////////////////////////////////////////////////////
+// 21) Low-level memory + MMIO: region ops + addr/load/store
+///////////////////////////////////////////////////////////////////////////
+
+proc mmio_demo -> u32:
+  let x u32 = 0
+  read32 REG 0 into x
+  write32 REG 4 123
+  return x
+end
+
+proc addr_load_store_demo -> i64:
+  let p0 = addr 4096 4 8 16
+  let y0 u32 = load u32 addr 4096 0 1 0
+  let z0 u32 = store u32 addr 4096 0 1 8 7
+  print y0
+  print z0
+  print p0
+  return (y0 as i64) + (z0 as i64)
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 22) Operator coverage: unary/binary/logical/ternary + word ops
+///////////////////////////////////////////////////////////////////////////
+
+proc operator_coverage -> i64:
+  let a i64 = 1
+  let b i64 = 2
+
+  let i_dec i64 = 123
+  let i_underscore i64 = 1_000_000
+  let i_hex i64 = 0xCAFE_BABE
+  let i_bin i64 = 0b1010_0101
+
+  let t bool = true
+  let f bool = false
+
+  let s0 string = "hello"
+  let s1 string = "with \\n escape"
+  let n = null
+
+  let u0 i64 = -i_dec
+  let u1 bool = not f
+  let u2 bool = !f
+  let u3 i64 = ~i_dec
+
+  let ar0 = a + b
+  let ar1 = a - b
+  let ar2 = a * b
+  let ar3 = 100 / b
+  let ar4 = 100 % b
+
+  let bw0 = a & b
+  let bw1 = a | b
+  let bw2 = a ^ b
+  let bw3 = a xor b
+
+  let sh0 = i_dec shl 2
+  let sh1 = i_dec shr 1
+  let sh2 = i_dec sar 1
+  let sh3 = i_dec << 1
+  let sh4 = i_dec >> 1
+
+  let c0 = a < b
+  let c1 = a <= b
+  let c2 = a > b
+  let c3 = a >= b
+  let c4 = a == b
+  let c5 = a != b
+
+  // equality shorthand (supported)
+  let c6 = a = b
+
+  let l0 = c0 and c5
+  let l1 = c0 or c4
+  let l2 = c0 && c5
+  let l3 = c0 || c4
+
+  let te0 = c0 ? a : b
+  let te1 = (a < b) ? (a + 1) : (b + 1)
+
+  print s0
+  print s1
+  print t
+  print f
+  print n
+
+  return ar0 + ar1 + ar2 + ar3 + ar4 +
+         bw0 + bw1 + bw2 + bw3 +
+         sh0 + sh1 + sh2 + sh3 + sh4 +
+         u0 + u3 + te0 + te1 +
+         i_underscore + i_hex + i_bin
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 23) Symbols / ident literals
+///////////////////////////////////////////////////////////////////////////
+
+proc symbol_demo -> i32:
+  let sym0 = #rane_rt_print
+  let sym1 = #REG
+  print sym0
+  print sym1
+  return 0
+end
+
+///////////////////////////////////////////////////////////////////////////
+// 24) Node/prose surface (v1) — fully supported and executable
+///////////////////////////////////////////////////////////////////////////
+
+module demo_struct
+
+node start:
+  set h Header to Header:
+    magic 0x52414E45
+    version 1
+    flags 0
+    size 4096
+  end
+
+  set m u32 to h.magic
+  set h.version to 2
+  add h.size by 512
+
+  say "ok"
+  go to node end_node
+end
+
+node end_node:
+  say "goodbye"
+  halt
+end
+
+start at node start
+
+///////////////////////////////////////////////////////////////////////////
+// 25) Full end-to-end program entry
+///////////////////////////////////////////////////////////////////////////
+
+proc main -> int requires heap_alloc threads channels file_io network_io syscalls dynamic_eval crypto:
+
+  let hdr Header = Header:
+    magic 0x52414E45
+    version 1
+    flags 0
+    size 4096
+  end
+
+  let p Point = Point: x 7 y 9 end
+  let v Vec3  = Vec3:  x 1 y 2 z 3 end
+
+  print hdr.magic
+  print p.x
+  print v.z
+
+  let f Flags = Flags.Read | Flags.Write
+  if (f & Flags.Write):
+    print "writable"
+  end
+
+  let c Color = Color.Green
+  print c
+
+  let m1 Maybe<i64> = Some 123
+  let m2 Maybe<i64> = None
+
+  match m1:
+    case Some x: print x
+    case None:   print "none"
+  end
+
+  match m2:
+    case Some x: print x
+    case None:   print "none"
+  end
+
+  let u IntOrFloat
+  set u.i to 10
+  print u.i
+  set u.f to 3.14
+  print u.f
+
+  let sum i64 = add5 1 2 3 4 5
+  let idv i64 = identity<i64> sum
+  print sum
+  print idv
+
+  print choose_demo 9 2
+
+  print mmio_demo
+  print addr_load_store_demo
+
+  print collection_demo
+  print ownership_example
+
+  print loop_example
+  print for_example
+  print loop_unroll_example
+  print tail_recursive 10 0
+
+  print match_example 1
+  print switch_example 2
+  print decide_example 3
+
+  let ax i64 = assert_example 5
+  print ax
+
+  let text string = file_read_example "file.txt"
+  print text
+  print defer_example "out.txt"
+
+  let netv i64 = await async_fetch
+  print netv
+
+  // spawn/join as verbs
+  let th1 = spawn spawn_worker 100000
+  let th2 = spawn spawn_worker 200000
+
+  send ch 11
+  send ch 22
+  let r1 i64 = recv ch
+  let r2 i64 = recv ch
+
+  let a1 i64 = join th1
+  let a2 i64 = join th2
+
+  print r1 + r2 + a1 + a2
+
+  // lock as verb
+  lock m1:
+    print "locked"
+  end
+
+  print asm_example
+  print try_example
+  print eval_example "3"
+
+  print operator_coverage
+  print symbol_demo
+
+  goto (1 == 1) -> L_true L_false
+
+label L_false:
+  trap 7
+  goto 1 -> L_end L_end
+
+label L_true:
+  trap
+
+label L_end:
+  halt
+
+  return 0
+end
