@@ -274,16 +274,6 @@ Output
 An expanded IR that is context-aware, deterministic, semantically enriched.
 The doc explicitly frames this IR as richer than LLVM IR in semantic meaning, but still simpler than an entire “ActionPlan.”
 
-Mental model:
-
-AST answers: “what did they write?”
-
-TIR answers: “what does it mean in typed ops?”
-
-CIAM Expanded IR answers: “what must actually happen, given the context, rules, and allowed powers?”
-
-
----
 
 6.2 Stage 2: Optimization (CIAM-Expanded IR → Optimized CIAM IR)
 
@@ -361,36 +351,16 @@ Runtime overhead target
 Minimal overhead: “lightweight guards + trace hooks + deterministic scheduling.”
 The system must not drop below 98% of native performance for “RANE CIAM expansion → machine code → executor.”
 
-
+runs executables 
 ---
 
 7. Putting it together as an implementable “AOT Resolver” architecture
 
 
-
 Here’s the complete Resolver build as a concrete pipeline with the real “things” you implement.
 
-7.1 Resolver front end (source → IntentGraph)
+source → optimized CIAM-processed expansion → machine code → executor
 
-Goal: produce an intent representation that can accept context.
-
-Inputs
-
-tokens (lexer)
-
-AST (parser)
-
-type info + capability info (typecheck)
-
-context metadata and domain rules
-
-Output
-
-IntentGraph (nodes = intents/actions; edges = flow + dependency + capability gates)
-
-Why this exists Because CIAM expansion is defined as “intent → deterministic actions,” not “text → text.”
-
-7.2 CIAM engine (IntentGraph → CIAM-Expanded IR)
 
 Goal: expand “what the developer meant” into explicit operations that preserve invariants and capability rules.
 
@@ -439,11 +409,11 @@ traces produced for replay/audit
 
 8. How the Resolver relates to “regular RANE compilation”
 
-Mode: Resolver mode (AOT Resolver)
+Mode: Resolver (AOT Resolver)
 
-RANE → IntentGraph → CIAM expansion → optimized CIAM IR → native code (+ metadata) → executor.
+RANE → IntentGraph within CIAM expansion → optimized CIAM IR → native code (+ metadata) → executor.
 
-Resolver mode is where “context becomes a compile-time semantic object” and determinism becomes an explicit runtime contract.
+Resolver is where “context becomes a compile-time semantic object” and determinism becomes an explicit runtime contract.
 
 
 ---
@@ -479,8 +449,8 @@ And it explicitly frames the Resolver as: compile-time contextual intelligence +
 
 RANE is already strong in deterministic systems programming, explicit memory control, safe parallelism, real-time DSP, sandboxed execution, portable AOT compilation, and low-level binary emission.
 
-I am willing to trade some determinism to avoid dropping under the 98% performance floor.
+It is acceptable to trade some determinism to avoid dropping under the 98% performance floor.
 
 And
 
-the CIAM domain rules I prefer to be written in a sugary abstraction-heavy Language within RANE
+the CIAM domain rules I prefer to be written in a smart Language within RANE
