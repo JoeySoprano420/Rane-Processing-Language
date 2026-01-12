@@ -1,0 +1,293 @@
+==============================================================================
+RANE PARSER — DETERMINISTIC PRECEDENCE + DISAMBIGUATION COMPANION RULES
+As of 01_12_2026
+Scope: sugar surface + canonical surface
+Purpose: make parsing deterministic with minimal punctuation, so CIAM never has to
+         “guess” intent from spans except in malformed code.
+==============================================================================
+
+0) Common terms used below
+- IDENT: identifier token
+- PATH: path_ident token stream (IDENT ("::" IDENT)*)
+- TYPE_START: a token sequence that can start a type_ref
+    TYPE_START := "*" | "fn" | "[" | IDENT | PATH
+- EXPR_START: token that can start an expression primary
+    EXPR_START := literal | "(" | "#" | IDENT/PATH | "choose" | "spawn" | "join" | "await"
+
+- NL: newline token (or line break boundary)
+- INDENT/DEDENT: lexer produces indentation tokens in sugar mode
+  (parser still supports explicit { } blocks; INDENT/DEDENT used only for
+   deterministic “: … end” blocks and to mark statement boundaries.)
+
+- “Significant NL” means NL that ends a statement in sugar mode
+  (i.e., not inside (), [], {}, and not escaped by trailing operator).
+
+IMPORTANT: All rules below are purely syntactic tie-breakers.
+Semantic validation still happens later (typecheck + CIAM + capability passes).
+
+
+==============================================================================
+1) “sugar call” vs “type_ref + struct_lit” ambiguity
+==============================================================================
+
+Ambiguity example A (struct literal, sugar):
+  Header:
+    magic 1
+  end
+
+Ambiguity example B (callish expression + block-like thing):
+  Header x:
+    ...
+  end
+  (not valid as call; but can appear if someone writes “Header x i64 -> ...” etc.)
+
+Core principle:
+  If a line begins with a token sequence that can be parsed as a TYPE_REF,
+  and it is immediately followed by ":" then it is ALWAYS a struct_lit header,
+  NOT a callish expression.
+
+Rule 1.1 — Colon after type-header binds to struct_lit
+- At expression level, when seeing:
+    <type_ref> ":" NL
+  parse as:
+    struct_lit(type_ref, kv_block)
+  and consume the entire “: ... end” block as the struct literal body.
+
+This applies in BOTH statement and expression positions, including:
+  set h Header to Header: ... end
+  let hdr Header = Header: ... end
+  return Header: ... end
+
+Rule 1.2 — Brace after type-header binds to struct_lit
+- Similarly:
+    <type_ref> "{" ...
+  is always struct_lit, never a call.
+
+Rule 1.3 — How to know if the first token sequence is a TYPE_REF
+- Parser attempts a “type_ref probe parse” with bounded lookahead:
+  It parses the maximal prefix that forms a valid type_ref under the grammar,
+  using these constraints:
+    - generic_args are allowed: Maybe<i64>
+    - ptr_type allowed: *T
+    - array_type allowed: [N]T
+    - fn_type allowed: fn(...) -> R
+    - PATH names allowed: rane::Foo
+  If the probe succeeds and the next token is ":" or "{", choose struct_lit.
+
+Rule 1.4 — When it’s a sugar call instead
+- If the token sequence begins with PATH/IDENT and:
+    - the probe type_ref either fails, OR
+    - probe succeeds but next token is NOT ":" or "{"
+  then parse it as a callish (sugar call) if it has at least one argument:
+    PATH arg1 arg2 ...
+  Otherwise it is a bare identifier expression.
+
+Rule 1.5 — Prevent “Header:” from being mistaken as label_stmt
+- Labels are only recognized when the first token is keyword "label".
+  So:
+    Header:
+  is never a label; it is a struct literal header (Rule 1.1).
+
+Rule 1.6 — KV lines inside struct_lit block
+- Inside a struct_lit sugar block:
+    field expr
+  is parsed as a KV pair where `field` is IDENT and the remainder of the line
+  is a full expression until significant NL.
+- If the KV line is:
+    field ":" expr
+  accept it as canonical-ish KV too.
+
+Rule 1.7 — Trailing “end” ownership
+- In sugar mode, “end” is owned by the nearest open colon block.
+  A struct_lit colon block is a colon block; it must close with “end”.
+  This prevents the parser from considering the struct literal body as a
+  general statement block.
+
+
+==============================================================================
+2) “Some x” as pattern vs callish expression (match arms)
+==============================================================================
+
+Ambiguity example:
+  match m1:
+    case Some x: print x
+    case None: print "none"
+  end
+
+But outside match:
+  let v = Some 123
+  print Some 123        (callish-style constructor)
+
+We need deterministic parsing that does NOT require type info.
+
+Rule 2.1 — “case” introduces PATTERN mode until “:” (or end-of-line in some forms)
+- When parsing a match/switch/decide arm that begins with keyword "case":
+  the parser enters PATTERN mode after "case" and continues consuming tokens
+  as a pattern until it hits the arm delimiter.
+  Arm delimiter is:
+    - ":" token (preferred), OR
+    - in canonical braces-mode, the next token is "{" (treat that as arm body),
+      but for your syntax, we standardize on ":".
+
+So:
+  case Some x: ...
+  parses `Some x` as a PATTERN, never as an expression call.
+
+Rule 2.2 — Pattern grammar in PATTERN mode (no backtracking to expr)
+- PATTERN mode parses one of:
+  (a) "_"                                wildcard
+  (b) literal                            int/str/bool/null
+  (c) IDENT                              binder OR nullary variant
+  (d) IDENT IDENT                        variant-constructor + binder (Some x)
+  (e) IDENT "(" IDENT ")"                canonical ctor binder (Some(x))
+  (f) IDENT "(" "_" ")"                  canonical ctor wildcard
+
+No other expression operators are allowed inside pattern tokens at this stage.
+That makes it deterministic and avoids parsing “Some a + b” as a pattern.
+
+Rule 2.3 — “default” never consumes a pattern unless explicitly allowed
+- For sugar:
+    default: <arm-body>
+  “default” is always the default arm. If you later want `default PAT: ...`,
+  make it a different keyword (e.g., `case _:`) to keep determinism.
+
+Rule 2.4 — Outside PATTERN mode, “Some x” is a callish expression by default
+- Anywhere else, “Some 123” is parsed as callish:
+    callish(PATH="Some", args=[123])
+  unless grammar context expects a type_ref (e.g., in variant_decl bodies).
+
+Rule 2.5 — Variant declarations vs calls
+- Inside:
+    variant Maybe<T>:
+      Some T
+      None
+    end
+  we are in VARIANT-ALT mode:
+    - “Some T” parsed as variant alternative (name + payload type),
+      NOT a call.
+  This mode is only active inside `variant_decl` bodies.
+
+Rule 2.6 — Prevent accidental call parsing in match arms without “case”
+- You currently allow arms:
+    default: print "other"
+  For any arm line that starts with "case", use PATTERN mode.
+  For any arm that starts with "default", skip pattern parse entirely.
+  Do NOT allow “Some x:” as an arm header without “case” keyword;
+  keep it invalid to avoid ambiguity.
+
+
+==============================================================================
+3) module used for normal modules vs node/prose modules (lookahead rules)
+==============================================================================
+
+You use:
+  module demo_root          (normal module decl)
+and later:
+  module demo_struct        (node/prose module host)
+  node start: ...
+  start at node start
+
+Deterministic goal:
+  Parse “module X” as the same AST node type, then classify it based on what
+  follows (node/prose items) using one token of lookahead across statements.
+
+Rule 3.1 — `module` always parses as ModuleDecl
+- Syntactically, every:
+    module IDENT
+  becomes a ModuleDecl node at parse time.
+- The parser does NOT need to decide “normal vs node/prose” at the moment it
+  reads the `module` line.
+
+Rule 3.2 — Node/prose blocks are recognized by leading keyword “node”
+- After a ModuleDecl, the parser checks the next non-empty, non-comment
+  statement’s first keyword:
+    - If it is "namespace" / "import" / "proc" / "type" / "const" / etc,
+      continue parsing as normal module contents (top_item stream).
+    - If it is "node" or "start", enter NODE_PROSE_MODE for subsequent items
+      UNTIL one of:
+        (a) EOF
+        (b) another "module" line
+        (c) a top-level construct not allowed in node mode (then error)
+
+This means:
+  module demo_struct
+  node start: ...
+  ...
+  is deterministically node/prose.
+
+Rule 3.3 — NODE_PROSE_MODE permitted top-level forms
+In NODE_PROSE_MODE, only allow:
+  - node_block_decl
+  - node_start_decl   (“start at node X”)
+  - opt_sep
+  - comments
+
+Everything else is a parse error (not “fallback to normal mode”), because
+silent fallback would reintroduce ambiguity.
+
+Rule 3.4 — “module” terminates NODE_PROSE_MODE unconditionally
+- If in NODE_PROSE_MODE and you see "module IDENT", you:
+    - close node/prose module (even if no start-at-node seen yet)
+    - begin a new ModuleDecl, then re-classify based on what follows.
+
+Rule 3.5 — Canonical files (syntax.ciam.rane) and node/prose
+- In canonical form you still have node blocks, but punctuation may differ.
+- The discriminator remains the same: presence of keyword "node" at top-level
+  after module line triggers NODE_PROSE_MODE.
+
+Rule 3.6 — Optional stricter rule (recommended for zero ambiguity)
+If you want *absolute* separation, reserve:
+  module node demo_struct
+or:
+  node_module demo_struct
+But with Rule 3.2–3.4 you already get deterministic behavior with your current
+surface.
+
+
+==============================================================================
+4) Additional small tie-breakers (recommended)
+==============================================================================
+
+These aren’t requested, but they prevent edge-case ambiguity in your sample:
+
+Rule 4.1 — “IDENT :” at statement start
+- In sugar mode, if a statement begins with IDENT followed immediately by ":":
+    - If the IDENT is one of the statement keywords (label not used here), it’s
+      a block header (e.g., if/while/for/match/try/catch/finally)
+    - Else if the parser can probe it as TYPE_REF and Rule 1.1 applies:
+      parse as struct_lit expression (often after `=` or `to`)
+    - Else: it is NOT a valid statement start. Error.
+This prevents accidental “foo:” being treated as some implicit label.
+
+Rule 4.2 — Callish vs named_type in binding contexts
+- After “let” or “proc” parameter lists in sugar:
+  the pattern is name then type_ref.
+  So:
+    proc f x i64 -> i64:
+  never treats “i64” as a call arg; it is type_ref.
+
+Rule 4.3 — “await async_fetch” is await_expr, not a call to `await`
+- Keywords spawn/join/await/choose/match/with/defer/lock are reserved and parsed
+  as their dedicated syntactic forms before considering callish.
+
+Rule 4.4 — “Some 123” in expression context
+- Parse as callish. CIAM/typechecker can then recognize it as variant ctor.
+
+
+==============================================================================
+5) Minimal implementation sketch (parser strategy)
+==============================================================================
+
+- Tokenize with INDENT/DEDENT for sugar mode; canonical ignores INDENT.
+- Parse as a stream of top_items.
+- Always build ModuleDecl nodes when you see `module IDENT`.
+- After ModuleDecl, peek next non-empty statement keyword:
+    if "node" or "start" => NODE_PROSE_MODE
+    else => normal mode
+- For expressions, apply:
+    if TYPE_REF_PROBE succeeds AND next token is ":" or "{" => struct_lit
+    else if PATH with >=1 arg => callish
+- For match arms:
+    after "case" => PATTERN mode until ":" delimiter
+
+That set of rules makes the sugar syntax deterministic without semantic info.
