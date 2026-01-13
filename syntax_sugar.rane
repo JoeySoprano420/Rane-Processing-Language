@@ -1,6 +1,6 @@
 // syntax_sugar.rane
 // SUGAR-RICH CANONICAL COVERAGE (CIAM-VERIFIED SURFACE)
-// As of 01_12_2026
+// As of 01_13_2026
 // Goal: exercise ALL language tiers end-to-end
 //   source → optimized CIAM-processed expansion → machine code → executor
 //
