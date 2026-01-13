@@ -2,14 +2,15 @@
 // File: rane_emitter.hpp  (C++20, header-only interface + small inline helpers)
 // ============================================================================
 //
-// Extended emitter: now supports
-// - floating point (XMM0-XMM3, addsd/subsd/mulsd/divsd, movsd, movq)
-// - more calling conventions (CallConv enum, variadic/fastcall stubs)
-// - ActionPlan lowering for: jump table switch, select (ternary), tailcall
-// - All previous features (see prior header for details)
+// Ready-to-compile emitter skeleton that matches the ActionPlan templates:
+// - emit_value(ValueId) -> leaves integer/bool result in RAX (bool canonicalized 0/1)
+// - emits blocks with Jump / CondJump (JmpIfZero = test rax,rax ; jz)
+// - deterministic scratch regs: R11 then R10 then R9
+// - deterministic temps on stack for nesting / call hazards
+// - Windows x64 ABI: 32-byte shadow space always reserved in frame
 //
 // You provide:
-// - actionplan.hpp (the structs we defined earlier, now with ConstFloat, Select, Switch, TailCall, etc.)
+// - actionplan.hpp (the structs we defined earlier)
 // - a minimal type-layout provider (sizes/field offsets) and symbol resolver.
 //
 // Build style:
@@ -26,36 +27,23 @@
 #include <variant>
 #include <cassert>
 #include <cstring>
-#include <algorithm>
 
-#include "actionplan.hpp"
+#include "actionplan.hpp" // from your prior definitions (rane::ActionPlan, ProcPlan, ValueId etc.)
 
 namespace rane::x64 {
 
     // ---------------------------
-    // Registers (Windows x64 + XMM)
+    // Registers (Windows x64)
     // ---------------------------
     enum class Reg : uint8_t {
         RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI,
-        R8, R9, R10, R11, R12, R13, R14, R15,
-        XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7
+        R8, R9, R10, R11, R12, R13, R14, R15
     };
 
     static constexpr Reg kResultReg = Reg::RAX;
     static constexpr Reg kScratch0 = Reg::R11;
     static constexpr Reg kScratch1 = Reg::R10;
     static constexpr Reg kScratch2 = Reg::R9;
-    static constexpr Reg kFloatResultReg = Reg::XMM0;
-
-    // ---------------------------
-    // Calling conventions
-    // ---------------------------
-    enum class CallConv : uint8_t {
-        Win64,      // default
-        FastCall,   // RCX, RDX, R8, R9, XMM0-3
-        VectorCall, // XMM0-5, RCX, RDX, R8, R9
-        Variadic    // floats in both GPR and XMM
-    };
 
     // ---------------------------
     // Relocation / patch types
@@ -64,17 +52,20 @@ namespace rane::x64 {
         Rel32_Jmp,      // E9 rel32
         Rel32_Jcc,      // 0F 8? rel32
         Rel32_Call,     // E8 rel32
-        RipRel32_Addr,  // e.g. mov rax, [rip+rel32]
+        RipRel32_Addr,  // e.g. mov rax, [rip+rel32]  (if you add it)
         Abs64_Imm,      // e.g. mov rax, imm64
     };
 
     struct Patch {
         PatchKind kind{};
-        uint32_t  at = 0;
-        BlockId   target_block{};
-        SymbolId  target_symbol{};
+        uint32_t  at = 0;           // offset within code buffer where the rel32/imm begins
+        BlockId   target_block{};   // for block patches
+        SymbolId  target_symbol{};  // for symbol patches
     };
 
+    // ---------------------------
+    // Label positions (blocks)
+    // ---------------------------
     struct Label {
         bool     bound = false;
         uint32_t pos = 0;
@@ -176,7 +167,8 @@ namespace rane::x64 {
     };
 
     // ---------------------------
-    // Minimal x64 encoder helpers (add XMM float ops)
+    // Minimal x64 encoder helpers
+    // (subset enough to match the templates above)
     // ---------------------------
     namespace enc {
 
@@ -318,57 +310,6 @@ namespace rane::x64 {
         // ret
         static inline void ret(CodeBuf& c) { c.u8(0xC3); }
 
-        // movsd xmm, xmm
-        static inline void movsd_rr(CodeBuf& c, Reg dst, Reg src) {
-            c.u8(0xF2); c.u8(0x0F); c.u8(0x10);
-            c.u8((uint8_t)(0xC0 | (((uint8_t)dst - (uint8_t)Reg::XMM0) << 3) | ((uint8_t)src - (uint8_t)Reg::XMM0)));
-        }
-        // movsd xmm, [rbp-disp]
-        static inline void movsd_xmm_mrbp(CodeBuf& c, Reg dst, int32_t disp) {
-            c.u8(0xF2); c.u8(0x0F); c.u8(0x10);
-            c.u8((uint8_t)(0x80 | (((uint8_t)dst - (uint8_t)Reg::XMM0) << 3) | 0x05));
-            c.u32((uint32_t)disp);
-        }
-        // movsd [rbp-disp], xmm
-        static inline void movsd_mrbp_xmm(CodeBuf& c, int32_t disp, Reg src) {
-            c.u8(0xF2); c.u8(0x0F); c.u8(0x11);
-            c.u8((uint8_t)(0x80 | (((uint8_t)src - (uint8_t)Reg::XMM0) << 3) | 0x05));
-            c.u32((uint32_t)disp);
-        }
-        // addsd xmm, xmm
-        static inline void addsd_rr(CodeBuf& c, Reg dst, Reg src) {
-            c.u8(0xF2); c.u8(0x0F); c.u8(0x58);
-            c.u8((uint8_t)(0xC0 | (((uint8_t)dst - (uint8_t)Reg::XMM0) << 3) | ((uint8_t)src - (uint8_t)Reg::XMM0)));
-        }
-        // subsd xmm, xmm
-        static inline void subsd_rr(CodeBuf& c, Reg dst, Reg src) {
-            c.u8(0xF2); c.u8(0x0F); c.u8(0x5C);
-            c.u8((uint8_t)(0xC0 | (((uint8_t)dst - (uint8_t)Reg::XMM0) << 3) | ((uint8_t)src - (uint8_t)Reg::XMM0)));
-        }
-        // mulsd xmm, xmm
-        static inline void mulsd_rr(CodeBuf& c, Reg dst, Reg src) {
-            c.u8(0xF2); c.u8(0x0F); c.u8(0x59);
-            c.u8((uint8_t)(0xC0 | (((uint8_t)dst - (uint8_t)Reg::XMM0) << 3) | ((uint8_t)src - (uint8_t)Reg::XMM0)));
-        }
-        // divsd xmm, xmm
-        static inline void divsd_rr(CodeBuf& c, Reg dst, Reg src) {
-            c.u8(0xF2); c.u8(0x0F); c.u8(0x5E);
-            c.u8((uint8_t)(0xC0 | (((uint8_t)dst - (uint8_t)Reg::XMM0) << 3) | ((uint8_t)src - (uint8_t)Reg::XMM0)));
-        }
-
-        // movq xmm, rax
-        static inline void movq_xmm_rax(CodeBuf& c, Reg xmm) {
-            c.bytes({0x66, 0x48, 0x0F, 0x6E, (uint8_t)(0xC0 + ((uint8_t)xmm - (uint8_t)Reg::XMM0) * 8)});
-        }
-        // movq rax, xmm
-        static inline void movq_rax_xmm(CodeBuf& c, Reg xmm) {
-            c.bytes({0x66, 0x48, 0x0F, 0x7E, (uint8_t)(0xC0 + ((uint8_t)xmm - (uint8_t)Reg::XMM0) * 8)});
-        }
-        // ucomisd xmm, xmm
-        static inline void ucomisd_rr(CodeBuf& c, Reg a, Reg b) {
-            c.u8(0x66); c.u8(0x0F); c.u8(0x2E);
-            c.u8((uint8_t)(0xC0 | (((uint8_t)a - (uint8_t)Reg::XMM0) << 3) | ((uint8_t)b - (uint8_t)Reg::XMM0)));
-        }
     } // namespace enc
 
     // ---------------------------
@@ -537,7 +478,7 @@ namespace rane::x64 {
     // ---------------------------
     struct EmitResult {
         std::vector<uint8_t> code;
-        std::vector<Patch>   patches;
+        std::vector<Patch>   patches;     // symbol + block patches
         FrameLayout          frame;
     };
 
@@ -546,12 +487,13 @@ namespace rane::x64 {
         const ProcPlan& proc;
         const ILayoutProvider& layout;
         const ISymbolResolver& syms;
-        CallConv callconv = CallConv::Win64;
 
         FrameLayout frame{};
         CodeBuf     code{};
         std::vector<Label> block_labels;
         std::vector<Patch> patches;
+
+        // deterministic temp stack index used by recursive emit_value
         uint32_t temp_sp = 0;
         uint32_t temp_max = 0;
 
@@ -562,6 +504,7 @@ namespace rane::x64 {
             : ap(ap_), proc(proc_), layout(layout_), syms(syms_) {
         }
 
+        // ----- temp management -----
         uint32_t temp_alloc() {
             uint32_t idx = temp_sp++;
             if (temp_sp > temp_max) temp_max = temp_sp;
@@ -574,6 +517,7 @@ namespace rane::x64 {
             return -(int32_t)off;
         }
 
+        // ----- emit helpers -----
         void bind_block(BlockId b) {
             auto& L = block_labels.at(b.v);
             L.bound = true;
@@ -591,47 +535,38 @@ namespace rane::x64 {
         }
 
         void emit_call_symbol(SymbolId callee) {
+            // For now we emit CALL rel32 to a symbol that the linker/loader resolves.
+            // Strategy: treat call target as a symbol label in the same module OR an import thunk label.
             uint32_t at = enc::call_rel32(code);
             patches.push_back(Patch{ PatchKind::Rel32_Call, at, {}, callee });
         }
 
+        // ----- core: emit_value(ValueId) -----
+        // Leaves result in RAX, bool normalized to 0/1 for compares.
         void emit_value(ValueId v) {
             const auto& n = ap.values.at(v.v);
 
             switch (n.kind) {
-            case ValueKind::ConstInt:
-                code.u64(std::get<ConstInt>(n.as).value);
-                break;
-            case ValueKind::ConstBool:
-                code.u64(std::get<ConstBool>(n.as).value ? 1 : 0);
-                break;
-            case ValueKind::ConstNull:
-                code.u64(0);
-                break;
+            case ValueKind::ConstInt: {
+                auto ci = std::get<ConstInt>(n.as);
+                enc::mov_ri64(code, Reg::RAX, (uint64_t)ci.value);
+            } break;
+
+            case ValueKind::ConstBool: {
+                auto cb = std::get<ConstBool>(n.as);
+                enc::mov_ri64(code, Reg::RAX, cb.value ? 1u : 0u);
+            } break;
+
+            case ValueKind::ConstNull: {
+                enc::mov_ri64(code, Reg::RAX, 0);
+            } break;
 
             case ValueKind::VarRef: {
-                auto var = std::get<VarRef>(n.as);
-                int32_t offs = rbp_disp_from_off(frame.local_offset(var.id));
-                enc::mov_r64_mrbp(code, Reg::RAX, offs);
+                auto vr = std::get<VarRef>(n.as);
+                uint32_t off = frame.local_offset(vr.local);
+                enc::mov_r64_mrbp(code, Reg::RAX, rbp_disp_from_off(off));
             } break;
 
-            case ValueKind::GlobalRef: {
-                auto glob = std::get<GlobalRef>(n.as);
-                // mov rax, qword ptr [rip+offset]
-                code.bytes({ 0x48, 0x8B, 0x05 });
-                uint32_t at = code.size();
-                code.u32(0);
-                patches.push_back(Patch{ PatchKind::RipRel32_Addr, at, {}, glob.id });
-            } break;
-
-            case ValueKind::ConstFloat: {
-                auto cf = std::get<ConstFloat>(n.as);
-                uint64_t bits;
-                std::memcpy(&bits, &cf.value, sizeof(bits));
-                enc::mov_ri64(code, Reg::RAX, bits);
-                enc::movq_xmm_rax(code, Reg::XMM0);
-                break;
-            }
             case ValueKind::FieldRef: {
                 auto fr = std::get<FieldRef>(n.as);
                 emit_value(fr.base);
@@ -666,225 +601,289 @@ namespace rane::x64 {
                 code.bytes({ 0x49, 0x8B, 0x03 });
             } break;
 
-            case ValueKind::Binary: {
-                auto b = std::get<Binary>(n.as);
-                if (n.type == float_type_id) {
-                    emit_value(b.a); // result in xmm0
-                    uint32_t t = temp_alloc();
-                    enc::movsd_mrbp_xmm(code, rbp_disp_from_off(frame.temp_offset(t)), Reg::XMM0);
-                    emit_value(b.b);
-                    enc::movsd_xmm_mrbp(code, Reg::XMM1, rbp_disp_from_off(frame.temp_offset(t)));
-                    temp_free();
-                    switch (b.op) {
-                        case BinOp::Add: enc::addsd_rr(code, Reg::XMM0, Reg::XMM1); break;
-                        case BinOp::Sub: enc::subsd_rr(code, Reg::XMM0, Reg::XMM1); break;
-                        case BinOp::Mul: enc::mulsd_rr(code, Reg::XMM0, Reg::XMM1); break;
-                        case BinOp::Div: enc::divsd_rr(code, Reg::XMM0, Reg::XMM1); break;
-                        default: assert(false && "float binop not implemented");
-                    }
+            case ValueKind::Unary: {
+                auto u = std::get<Unary>(n.as);
+                emit_value(u.a);
+                switch (u.op) {
+                case UnOp::Neg:
+                    // neg rax => 48 F7 D8
+                    code.bytes({ 0x48, 0xF7, 0xD8 });
+                    break;
+                case UnOp::Not:
+                    // logical not: rax = (rax==0) ? 1 : 0
+                    enc::test_rr(code, Reg::RAX, Reg::RAX);
+                    // setz al ; movzx rax, al
+                    enc::setcc_al(code, enc::SetCC::E);
+                    enc::movzx_rax_al(code);
+                    break;
+                case UnOp::BitNot:
+                    // not rax => 48 F7 D0
+                    code.bytes({ 0x48, 0xF7, 0xD0 });
                     break;
                 }
-                // ... integer as before
+            } break;
+
+            case ValueKind::Cast: {
+                auto cst = std::get<Cast>(n.as);
+                // bootstrap: assume integer casts are no-ops or trunc/extend handled by resolver constraints
+                emit_value(cst.a);
+            } break;
+
+            case ValueKind::Binary: {
+                auto b = std::get<Binary>(n.as);
+
+                // Evaluate left -> rax, spill to temp, eval right -> rax, load left -> r11, op -> rax.
                 emit_value(b.a);
                 uint32_t t = temp_alloc();
                 enc::mov_mrbp_r64(code, rbp_disp_from_off(frame.temp_offset(t)), Reg::RAX);
 
                 emit_value(b.b);
+                // r11 = left
                 enc::mov_r64_mrbp(code, Reg::R11, rbp_disp_from_off(frame.temp_offset(t)));
                 temp_free();
 
                 switch (b.op) {
                 case BinOp::Add:
+                    // rax = r11 + rax  => move rax into scratch? easiest: add r11, rax then move back
                     enc::add_rr(code, Reg::R11, Reg::RAX);
                     enc::mov_rr(code, Reg::RAX, Reg::R11);
                     break;
                 case BinOp::Sub:
+                    // rax = r11 - rax => sub r11, rax ; mov rax,r11
                     enc::sub_rr(code, Reg::R11, Reg::RAX);
                     enc::mov_rr(code, Reg::RAX, Reg::R11);
                     break;
                 case BinOp::Mul:
+                    // rax = r11 * rax => mov rax,r11 ; imul rax, r?? (need rax*=rhs)
+                    // We'll: mov r10, rax (rhs), mov rax,r11, imul rax, r10
                     enc::mov_rr(code, Reg::R10, Reg::RAX);
                     enc::mov_rr(code, Reg::RAX, Reg::R11);
                     enc::imul_rr(code, Reg::RAX, Reg::R10);
                     break;
-                case BinOp::Div:
-                    enc::mov_rr(code, Reg::RDX, Reg::R11); // dividend in RDX
-                    enc::mov_rr(code, Reg::RAX, Reg::R11);
-                    code.bytes({ 0x48, 0x99 }); // cqo
-                    code.bytes({ 0x48, 0xF7, 0xF8 }); // idiv rax
-                    break;
-                case BinOp::Mod:
-                    enc::mov_rr(code, Reg::RDX, Reg::R11);
-                    enc::mov_rr(code, Reg::RAX, Reg::R11);
-                    code.bytes({ 0x48, 0x99 }); // cqo
-                    code.bytes({ 0x48, 0xF7, 0xF8 }); // idiv rax
-                    enc::mov_rr(code, Reg::RAX, Reg::RDX); // move remainder to rax
-                    break;
                 case BinOp::And:
+                    // bitwise and: and r11, rax => 49 21 C3? We'll implement via bytes: REX.W; 21 /r
+                    // Use: and r11, rax (r/m64=r11, reg=rax) => 4C 21 C3  (REX.W R=1 B=1)
                     code.bytes({ 0x4C, 0x21, 0xC3 });
                     enc::mov_rr(code, Reg::RAX, Reg::R11);
                     break;
                 case BinOp::Or:
+                    // or r11, rax => 4C 09 C3
                     code.bytes({ 0x4C, 0x09, 0xC3 });
                     enc::mov_rr(code, Reg::RAX, Reg::R11);
                     break;
                 case BinOp::Xor:
+                    // xor r11, rax => 4C 31 C3
                     code.bytes({ 0x4C, 0x31, 0xC3 });
                     enc::mov_rr(code, Reg::RAX, Reg::R11);
                     break;
-                case BinOp::Shl:
-                    enc::mov_rr(code, Reg::RCX, Reg::RAX);
-                    code.bytes({ 0x49, 0xD3, 0xE3 }); // shl r11, cl
-                    enc::mov_rr(code, Reg::RAX, Reg::R11);
-                    break;
-                case BinOp::Shr:
-                    enc::mov_rr(code, Reg::RCX, Reg::RAX);
-                    code.bytes({ 0x49, 0xD3, 0xEB }); // shr r11, cl
-                    enc::mov_rr(code, Reg::RAX, Reg::R11);
-                    break;
                 default:
-                    assert(false && "Binary op not yet implemented in emitter");
+                    // Div/Mod/Shifts: you can add exact encodings later.
+                    // Keep compile-ready:
+                    assert(false && "Binary op not yet implemented in bootstrap emitter");
                 }
+            } break;
+
+            case ValueKind::Compare: {
+                auto c = std::get<Compare>(n.as);
+
+                // eval a -> temp, eval b -> rax, load a -> r11, cmp r11, rax, setcc al, movzx rax, al
+                emit_value(c.a);
+                uint32_t t = temp_alloc();
+                enc::mov_mrbp_r64(code, rbp_disp_from_off(frame.temp_offset(t)), Reg::RAX);
+
+                emit_value(c.b);
+                enc::mov_r64_mrbp(code, Reg::R11, rbp_disp_from_off(frame.temp_offset(t)));
+                temp_free();
+
+                enc::cmp_rr(code, Reg::R11, Reg::RAX);
+
+                enc::SetCC scc = enc::SetCC::E;
+                switch (c.op) {
+                case CmpOp::EQ: scc = enc::SetCC::E; break;
+                case CmpOp::NE: scc = enc::SetCC::NE; break;
+                case CmpOp::LT: scc = enc::SetCC::L; break;
+                case CmpOp::LE: scc = enc::SetCC::LE; break;
+                case CmpOp::GT: scc = enc::SetCC::G; break;
+                case CmpOp::GE: scc = enc::SetCC::GE; break;
+                }
+                enc::setcc_al(code, scc);
+                enc::movzx_rax_al(code);
             } break;
 
             case ValueKind::Call: {
                 auto call = std::get<Call>(n.as);
+
+                // flush cache hook (if you implement caching later)
+
+                // Evaluate args left-to-right into RAX then move into ABI regs.
+                // Note: this implementation supports up to 4 args in regs; extras TODO.
                 static constexpr Reg abi_regs[4] = { Reg::RCX, Reg::RDX, Reg::R8, Reg::R9 };
+
                 size_t narg = call.args.size();
                 size_t reg_args = (narg > 4 ? 4 : narg);
 
-                // Evaluate and move register arguments
                 for (size_t i = 0; i < reg_args; ++i) {
                     emit_value(call.args[i]);
                     enc::mov_rr(code, abi_regs[i], Reg::RAX);
                 }
 
-                // Stack arguments (right-to-left, pushed before call)
                 if (narg > 4) {
-                    size_t stack_args = narg - 4;
-                    size_t stack_bytes = ((stack_args * 8 + 15) / 16) * 16;
-                    for (size_t i = narg; i-- > 4;) {
-                        emit_value(call.args[i]);
-                        code.u8(0x50); // push rax
-                    }
+                    // TODO: stack args (right-to-left) while keeping 16-byte alignment.
+                    assert(false && "Stack args not implemented yet");
                 }
 
                 emit_call_symbol(call.callee);
-
-                if (narg > 4) {
-                    size_t stack_args = narg - 4;
-                    if (stack_args > 0) {
-                        code.bytes({ 0x48, 0x83, 0xC4, (uint8_t)(stack_args * 8) }); // add rsp, N*8
-                    }
-                }
-            } break;
-
-            case ValueKind::Select: {
-                // Ternary: cond ? a : b
-                auto sel = std::get<Select>(n.as);
-                BlockId true_blk{(uint32_t)block_labels.size()};
-                BlockId false_blk{(uint32_t)block_labels.size() + 1};
-                BlockId join_blk{(uint32_t)block_labels.size() + 2};
-                // Evaluate cond to RAX
-                emit_value(sel.cond);
-                enc::test_rr(code, Reg::RAX, Reg::RAX);
-                uint32_t jz_at = enc::jcc_rel32(code, enc::Jcc::JZ);
-                // True branch
-                emit_value(sel.if_true);
-                uint32_t jmp_at = enc::jmp_rel32(code);
-                // False branch
-                code.patch_i32(jz_at, (int32_t)(code.size() - (jz_at + 4)));
-                emit_value(sel.if_false);
-                // Join
-                code.patch_i32(jmp_at, (int32_t)(code.size() - (jmp_at + 4)));
-                break;
-            }
-
-            case ValueKind::Switch: {
-                // Lower to jump table if dense, else chain of compares
-                auto sw = std::get<Switch>(n.as);
-                uint32_t count = sw.values.size();
-                uint32_t jimplem = 0;
-                if (count > 1) {
-                    // Heuristic: dense if range covers less than 1/4 of possible values
-                    int64_t minval = (int64_t)std::get<ConstInt>(sw.values.front().as).value;
-                    int64_t maxval = (int64_t)std::get<ConstInt>(sw.values.back().as).value;
-                    if ((maxval - minval) < (count * 4)) {
-                        jimplem = 1;
-                        // Naive jump table: entry for each value, direct Jmp to target.
-                        // TODO: optimize sparse tables (hash table etc.)
-                        code.u8(0xEB); // jmp short (patchable)
-                        uint32_t jmp_patch_at = code.size();
-                        code.u32(0); // placeholder for patching jump
-                        // Emit jump table
-                        uint32_t base = 0;
-                        for (const auto& v : sw.values) {
-                            auto target = std::get<SwitchValue>(v.as).target;
-                            code.u32(0); // placeholder
-                            patches.push_back(Patch{ PatchKind::Rel32_Jmp, (uint32_t)code.size(), target, {} });
-                        }
-                        // Patch jump offset
-                        uint32_t jmp_target = code.size() + 4 * count; // after jump table
-                        code.patch_i32(jmp_patch_at, jmp_target - (jmp_patch_at + 4));
-                    }
-                }
-                if (jimplem == 0) {
-                    // Fallback: chain of cmp/jbe/jmp
-                    // TODO: optimize me
-                    for (size_t i = 0; i < count; ++i) {
-                        auto target = std::get<SwitchValue>(sw.values[i].as).target;
-                        emit_value(sw.values[i]);
-                        enc::cmp_rr(code, Reg::RAX, Reg::RAX);
-                        if (i + 1 < count) {
-                            enc::jcc_rel32(code, enc::Jcc::JBE);
-                        }
-                        else {
-                            enc::jmp_rel32(code);
-                        }
-                        patches.push_back(Patch{ PatchKind::Rel32_Jmp, code.size(), target, {} });
-                    }
-                }
-            } break;
-
-            case ValueKind::TailCall: {
-                // Lowered tail call: direct jmp to target proc
-                auto tc = std::get<TailCall>(n.as);
-                BlockId target_blk = tc.target;
-                uint32_t at = enc::jmp_rel32(code);
-                patches.push_back(Patch{ PatchKind::Rel32_Jmp, at, target_blk, {} });
+                // return is already in RAX
             } break;
 
             default:
-                assert(false && "Value kind not implemented in emitter");
+                assert(false && "emit_value: unsupported ValueKind in bootstrap emitter");
             }
         }
 
+        // ----- actions -----
+        void emit_action(const Action& a) {
+            switch (a.kind) {
+            case ActionKind::Eval: {
+                auto e = std::get<EvalAction>(a.as);
+                emit_value(e.expr);
+            } break;
+
+            case ActionKind::Assign: {
+                auto asg = std::get<AssignAction>(a.as);
+
+                // Emit RHS -> RAX first (deterministic)
+                emit_value(asg.value);
+
+                // Store to lvalue:
+                const auto& tgt = ap.values.at(asg.target.v);
+
+                if (tgt.kind == ValueKind::VarRef) {
+                    auto vr = std::get<VarRef>(tgt.as);
+                    uint32_t off = frame.local_offset(vr.local);
+                    enc::mov_mrbp_r64(code, off, Reg::RAX);
+                    return;
+                }
+
+                // FieldRef / IndexRef targets need address compute; simplest:
+                // - compute address into R11, then store [R11] = RAX
+                // For bootstrap: handle IndexRef address; FieldRef assumes pointer base + offset.
+                if (tgt.kind == ValueKind::FieldRef) {
+                    auto fr = std::get<FieldRef>(tgt.as);
+                    // compute base -> R11
+                    emit_value(fr.base);
+                    enc::mov_rr(code, Reg::R11, Reg::RAX);
+                    // store to [r11 + k]
+                    uint32_t k = layout.field_offset(ap.values.at(fr.base.v).type, fr.field);
+                    // MOV [R11+disp32], RAX => 49 89 83 disp32
+                    code.bytes({ 0x49, 0x89, 0x83 });
+                    code.u32(k);
+                    return;
+                }
+
+                if (tgt.kind == ValueKind::IndexRef) {
+                    auto ir = std::get<IndexRef>(tgt.as);
+
+                    // preserve value in temp because we must compute address
+                    uint32_t tv = temp_alloc();
+                    enc::mov_mrbp_r64(code, rbp_disp_from_off(frame.temp_offset(tv)), Reg::RAX);
+
+                    // base -> rax
+                    emit_value(ir.base);
+                    uint32_t tb = temp_alloc();
+                    enc::mov_mrbp_r64(code, rbp_disp_from_off(frame.temp_offset(tb)), Reg::RAX);
+
+                    // index -> rax
+                    emit_value(ir.index);
+
+                    enc::mov_r64_mrbp(code, Reg::R11, rbp_disp_from_off(frame.temp_offset(tb)));
+                    temp_free(); // tb
+
+                    uint32_t S = layout.element_size(ap.values.at(ir.base.v).type);
+                    if ((S & (S - 1)) == 0) {
+                        uint8_t sh = 0; while ((1u << sh) != S) sh++;
+                        code.bytes({ 0x48, 0xC1, 0xE0, sh });
+                    }
+                    else {
+                        code.bytes({ 0x48, 0x69, 0xC0 });
+                        code.u32(S);
+                    }
+                    enc::add_rr(code, Reg::R11, Reg::RAX);
+
+                    // load value back into rax
+                    enc::mov_r64_mrbp(code, Reg::RAX, rbp_disp_from_off(frame.temp_offset(tv)));
+                    temp_free(); // tv
+
+                    // MOV [R11], RAX => 49 89 03
+                    code.bytes({ 0x49, 0x89, 0x03 });
+                    return;
+                }
+
+                assert(false && "Assign target kind not supported");
+            } break;
+
+            case ActionKind::Jump: {
+                auto j = std::get<JumpAction>(a.as);
+                emit_jmp_block(j.target);
+            } break;
+
+            case ActionKind::CondJump: {
+                auto cj = std::get<CondJumpAction>(a.as);
+                emit_value(cj.cond);                 // -> RAX
+                enc::test_rr(code, Reg::RAX, Reg::RAX);
+                emit_jz_block(cj.if_false);
+                emit_jmp_block(cj.if_true);
+            } break;
+
+            case ActionKind::Trap: {
+                // Minimal: int3 for trap
+                code.u8(0xCC);
+            } break;
+
+            case ActionKind::Halt: {
+                // Minimal: ud2 for halt
+                code.bytes({ 0x0F, 0x0B });
+            } break;
+
+            default:
+                break;
+            }
+        }
+
+        // ----- procedure emission -----
         EmitResult emit_proc() {
             frame = compute_frame_layout(proc, ap, layout);
+
+            // Prepare block label table
             block_labels.resize(proc.blocks.size());
 
+            // Prologue
             enc::push_rbp(code);
             enc::mov_rbp_rsp(code);
             if (frame.total_bytes) enc::sub_rsp_imm32(code, frame.total_bytes);
 
+            // Emit blocks in order (deterministic)
             for (const auto& b : proc.blocks) {
                 bind_block(b.id);
                 for (const auto& a : b.actions) emit_action(a);
             }
 
+            // Epilogue (if no explicit return yet; your plan can encode returns as assignments + Jump to epilogue)
             enc::mov_rsp_rbp(code);
             enc::pop_rbp(code);
             enc::ret(code);
 
-            // Patch only block rel32 (not symbol calls)
+            // Patch block rel32
             for (auto& p : patches) {
                 if (p.kind == PatchKind::Rel32_Jmp || p.kind == PatchKind::Rel32_Jcc) {
                     auto& L = block_labels.at(p.target_block.v);
                     assert(L.bound);
-                    int32_t rel = (int32_t)L.pos - (int32_t)(p.at + 4);
+                    int32_t rel = (int32_t)L.pos - (int32_t)(p.at + 4); // rel from end of imm32
                     code.patch_i32(p.at, rel);
                 }
             }
+
+            // Note: symbol call patches are left for the final link/loader step (ExecMeta relocs).
 
             EmitResult out;
             out.code = std::move(code.b);
@@ -895,3 +894,45 @@ namespace rane::x64 {
     };
 
 } // namespace rane::x64
+
+
+
+// ============================================================================
+// File: rane_execmeta.hpp  (C++20, binary writer + symbol/reloc tables)
+// ============================================================================
+//
+// ExecMeta format (binary):
+//
+//   struct Header {
+//     u32 magic = 'R''E''M''1';   // 0x314D4552
+//     u16 version = 1;
+//     u16 endian  = 1;           // 1 = little
+//     u32 header_size;
+//     u32 proc_count;
+//     u32 sym_count;
+//     u32 reloc_count;
+//     u32 str_bytes;
+//     u32 procs_off;
+//     u32 syms_off;
+//     u32 relocs_off;
+//     u32 str_off;
+//   }
+//
+//   ProcRec[proc_count]:
+//     u32 proc_symbol_id;
+//     u32 name_str_off;          // offset in string table
+//     u32 code_off;              // offset in .text blob inside your module package
+//     u32 code_size;
+//     u32 caps_word_off;         // offset in caps_words area (u64 words) relative to procs_off end
+//     u32 caps_word_count;
+//     u32 frame_size;            // total_bytes (for debugging / stack probes)
+//     u32 reserved;
+//
+//   SymRec[sym_count]:
+//     u32 symbol_id;             // your SymbolId.v
+//     u32 name_str_off;
+//     u8  kind;                  // SymKind
+//     u8  reserved0[3];
+//     u32 aux0;                  // optional (import ordinal, dll index, etc)
+//     u32 aux1;
+//
