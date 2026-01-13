@@ -407,4 +407,3 @@ MINIMUM REQUIRED IMPLEMENTATION SURFACE (so this is executable TODAY)
   - guard id allocation + anchor binding
   - import list extraction
   - policy profile serialization
-
