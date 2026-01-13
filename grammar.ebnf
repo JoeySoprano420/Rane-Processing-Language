@@ -69,7 +69,7 @@ symbol_lit      = "#", ident ;
 LP              = "(" ; RP = ")" ;
 LB              = "{" ; RB = "}" ;
 LS              = "[" ; RS = "]" ;
-LT              = "<" ; GT = ">" ;
+LT              = "<" ; GT              = ">" ;
 COMMA           = "," ;
 COLON           = ":" ;
 SEMI            = ";" ;
@@ -572,7 +572,7 @@ expr_stmt       = expr ;
 expr            = assign_expr ;
 
 (* allow shorthand equality used as expression (c6 = a = b) *)
-assign_expr     = ternary_expr, ( ws?, "=", ws?, ternary_expr )? ;
+assign_expr     = ternary_expr, ( ws?, "=", ws?, assign_expr )? ;
 
 ternary_expr    = logical_or_expr, ( ws?, QMARK, ws?, expr, ws?, ":", ws?, expr )? ;
 
@@ -603,6 +603,7 @@ postfix_tail    =
     ws?, LP, ws?, arg_list?, ws?, RP
   | ws?, DOT, ws?, ident
   | ws?, LS, ws?, expr, ws?, RS
+  | ws,"as", ws, type_ref
   ;
 
 primary_expr    =
@@ -640,7 +641,7 @@ struct_lit       =
   ;
 
 struct_kv_list   = struct_kv, { ws?, COMMA, ws?, struct_kv } ;
-struct_kv        = ident, ws?, ":", ws?, expr ;
+struct_kv        = ident, ws, ":", ws, expr ;
 
 struct_kv_list_sugar = { struct_kv_sugar, opt_sep } ;
 struct_kv_sugar  = ident, ws, expr ;
