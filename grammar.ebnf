@@ -1,64 +1,569 @@
 (*=============================================================================
-  METADATA STRUCTURES
+  RANE — UPDATED COMPLETE EBNF GRAMMAR
+  (fully covers: syntax_sugar.rane + syntax.ciam.rane)
+  As of 01_12_2026
+
+  Two surfaces, one grammar:
+    1) SUGAR SURFACE (minimal punctuation, indentation + ":" + "end")
+       - import rane_rt_print
+       - proc square x i64 -> i64: ... end
+       - struct Header: magic u32 ... end
+       - with open path as f: ... end
+       - defer close f
+       - lock m1: ... end
+       - spawn spawn_worker 100000
+       - join th1
+       - match val: case 0: ... default: ... end
+       - node/prose: node start: set h Header to Header: ... end ...
+
+    2) CANONICAL (CIAM-LOWERED) SURFACE (braces/semicolons/commas restored)
+       - import rane_rt_print;
+       - proc square(x: i64) -> i64 { ... }
+       - enum Flags : u8 { ... }
+       - capability(heap_alloc);
+       - with open(path) as f { ... }
+       - (and/or CIAM can lower with/defer/lock/spawn/join/match)
+
+  Design rules for determinism:
+    - Blocks are explicit: either { ... } or : ... end
+    - Newlines can terminate statements in sugar; semicolons terminate in canonical
+    - Parentheses and commas are optional in sugar for many constructs, but always
+      accepted in canonical.
+    - This grammar is intentionally permissive; the resolver/typechecker enforces
+      constraints (e.g., lvalue requirements, const_expr folding, capability rules).
+
+  EBNF conventions:
+    X? optional, X* repeat, X+ repeat, (A|B) alternatives
 =============================================================================*)
 
-struct ExecMetaHeader {
-  u32 magic;          // 'RMET' = 0x54454D52
-  u16 version;        // 1
-  u16 flags;          // future
-  u32 file_size;      // bytes
-  u32 section_count;  // number of sections
-  u32 section_table_off;
-  u32 strtab_off;     // string table (NUL-terminated)
-  u32 strtab_size;
-  u32 symtab_off;     // symbol table (procedures/imports/globals)
-  u32 symtab_count;
-  u32 captab_off;     // capability table
-  u32 cap_count;
-  u32 proctab_off;    // per-proc metadata (caps + policy)
-  u32 proc_count;
-  u32 reserved[6];
-};
+(*=============================================================================
+  0) LEXICAL TOKENS
+=============================================================================*)
 
-struct ExecMetaSection {
-  u32 name_str_off;   // offset into strtab
-  u32 off;            // file offset
-  u32 size;           // bytes
-  u32 type;           // 1=strtab,2=symtab,3=captab,4=proctab
-};
+letter          = "A".."Z" | "a".."z" | "_" ;
+digit           = "0".."9" ;
+hexdigit        = digit | "A".."F" | "a".."f" ;
 
-enum SymKind : u32 { SYM_PROC=1, SYM_IMPORT=2, SYM_GLOBAL=3 };
+ident           = letter, { letter | digit } ;
+path_ident      = ident, { "::", ident } ;
 
-struct ExecMetaSymbol {
-  u32 kind;           // SymKind
-  u32 name_str_off;   // "namespace::proc"
-  u32 linkage_id;     // compiler-assigned stable symbol id (@sym#) OR hash
-  u32 aux_index;      // if kind==SYM_PROC: index into ProcMeta table
-};
+(* literals *)
+string_lit      = '"', { char | escape }, '"' ;
+escape          = "\", ( "\" | '"' | "n" | "r" | "t" ) ;
 
-struct ExecMetaCap {
-  u32 name_str_off;   // "heap_alloc"
-  u32 cap_id;         // index (redundant but explicit)
-  u32 flags;          // reserved (e.g., "dangerous", "io", "net")
-  u32 reserved;
-};
+int_dec         = ["-"], digit, { digit | "_" } ;
+int_hex         = ["-"], "0x", hexdigit, { hexdigit | "_" } ;
+int_bin         = ["-"], "0b", ("0"|"1"), { ("0"|"1") | "_" } ;
+int_lit         = int_hex | int_bin | int_dec ;
 
-struct ProcMeta {
-  u32 proc_sym_linkage_id;   // matches ExecMetaSymbol.linkage_id
-  u32 caps_bitset_off;       // offset to u64 words in the caps blob
-  u16 caps_word_count;       // number of u64 words
-  u16 policy_flags;          // e.g., deterministic-only, no-jit, etc.
-  u32 diag_name_str_off;     // optional display name
-  u32 reserved;
-};
+float_lit       = ["-"],
+                  ( digit, { digit | "_" }, ".", digit, { digit | "_" } ),
+                  [ ("e"|"E"), ["+"|"-"], digit, { digit | "_" } ] ;
 
-struct ProcMetaList {
-  u32 proc_sym_linkage_id;
-  u32 cap_list_off;      // points into caplist blob
-  u16 cap_count;
-  u16 policy_flags;
-  u32 reserved[2];
-};
+bool_lit        = "true" | "false" ;
+null_lit        = "null" ;
+
+symbol_lit      = "#", ident ;
+
+(* punctuation *)
+LP              = "(" ; RP = ")" ;
+LB              = "{" ; RB = "}" ;
+LS              = "[" ; RS = "]" ;
+LT              = "<" ; GT              = ">" ;
+COMMA           = "," ;
+COLON           = ":" ;
+SEMI            = ";" ;
+DOT             = "." ;
+ARROW           = "->" ;
+FATARROW        = "=>" ;   (* reserved *)
+PIPE            = "|" ;
+QMARK           = "?" ;
+
+(* whitespace / separators *)
+ws              = { " " | "\t" } ;
+nl              = "\n" | "\r\n" ;
+
+comment_line    = "//", { ? not-nl ? }, nl ;
+comment_block   = "/*", { ? any ? }, "*/" ;
+
+(* statement separators:
+   - sugar: newline(s) or semicolon(s)
+   - canonical: semicolon required but allow nl as whitespace *)
+sep             = ( SEMI | nl )+ ;
+opt_sep         = ( SEMI | nl )* ;
+
+EOF             = ? end of input ? ;
+
+(*=============================================================================
+  1) TOP LEVEL
+=============================================================================*)
+
+unit            = opt_sep, { top_item, opt_sep }, EOF ;
+
+top_item        = import_decl
+                | module_decl
+                | namespace_decl
+                | visibility_item
+                | type_decl
+                | proc_decl
+                | const_decl
+                | pragma_decl
+                | define_decl
+                | mmio_decl
+                | capability_decl
+                | contract_decl
+                | macro_decl
+                | template_decl
+                | global_var_decl
+                | node_module_group
+                ;
+
+(*=============================================================================
+  2) IMPORTS / MODULES / NAMESPACES / VISIBILITY
+=============================================================================*)
+
+import_decl     = "import", ws, import_path, (SEMI | nl | EOF) ;
+import_path     = path_ident ;
+
+module_decl     = "module", ws, ident, (SEMI | nl | EOF) ;
+
+namespace_decl  = "namespace", ws, ident, ws?, block_like(ns_item_list) ;
+ns_item_list    = { ns_item, opt_sep } ;
+
+ns_item         = import_decl
+                | visibility_item
+                | type_decl
+                | proc_decl
+                | const_decl
+                | pragma_decl
+                | define_decl
+                | mmio_decl
+                | capability_decl
+                | contract_decl
+                | macro_decl
+                | template_decl
+                | global_var_decl
+                | node_module_group
+                ;
+
+visibility_item = visibility_kw, ws, (proc_decl | type_decl | const_decl | global_var_decl) ;
+visibility_kw   = "public" | "private" | "protected" | "admin" | "export" ;
+
+(*=============================================================================
+  3) TYPES
+=============================================================================*)
+
+type_decl       = primitive_decl
+                | typealias_decl
+                | alias_decl
+                | struct_decl
+                | enum_decl
+                | variant_decl
+                | union_decl
+                ;
+
+primitive_decl  = "type", ws, ident, (SEMI | nl | EOF) ;
+
+typealias_decl  = ("typealias" | "type_alias"), ws, ident, ws?, "=", ws?, type_ref, (SEMI | nl | EOF) ;
+alias_decl      = "alias", ws, ident, ws?, "=", ws?, type_ref, (SEMI | nl | EOF) ;
+
+type_ref        = fn_type
+                | ptr_type
+                | array_type
+                | generic_type
+                | named_type
+                ;
+
+named_type      = path_ident ;
+
+ptr_type        = "*", ws?, type_ref ;
+
+array_type      = LS, ws?, const_expr, ws?, RS, ws?, type_ref
+                | "[", ws?, const_expr, ws?, "]", ws?, type_ref ;
+
+generic_type    = path_ident, ws?, generic_args ;
+
+generic_args    = LT, ws?, type_ref, { ws?, COMMA?, ws?, type_ref }, ws?, GT ;
+
+fn_type         = "fn", ws?, LP, ws?, type_ref_list?, ws?, RP, ws?, ARROW, ws?, type_ref ;
+type_ref_list   = type_ref, { ws?, COMMA, ws?, type_ref } ;
+
+(*=============================================================================
+  4) CONSTS / CTFE
+=============================================================================*)
+
+const_decl      =
+  ( "const" | "constexpr" | "constinit" ),
+  ws, ident,
+  ( ws, type_ref )?,                 (* sugar: const PI f64 = ... *)
+  ( ws?, ":", ws?, type_ref )?,      (* canonical: const PI: f64 = ... *)
+  ws?, "=", ws?, const_expr,
+  (SEMI | nl | EOF)
+|
+  "consteval", ws, proc_decl
+;
+
+const_expr      = expr ;  (* semantic restriction: must fold *)
+
+(*=============================================================================
+  5) ATTRIBUTES
+=============================================================================*)
+
+attribute_list  = { attribute, opt_sep } ;
+attribute       = "@", ident, ( ws?, attribute_args )? ;
+attribute_args  =
+    LP, ws?, attr_arg, { ws?, COMMA, ws?, attr_arg }, ws?, RP
+  | ws, attr_arg, { ws, attr_arg }                  (* sugar: @derive Eq Ord Debug *)
+  ;
+attr_arg        = ident | string_lit | int_lit ;
+
+(*=============================================================================
+  6) STRUCT / ENUM / VARIANT / UNION
+=============================================================================*)
+
+struct_decl     = attribute_list?, "struct", ws, ident, ( ws?, generic_params )?, ws?,
+                  block_like(struct_field_list) ;
+
+struct_field_list = { struct_field, opt_sep } ;
+
+struct_field    =
+    ident, ws, type_ref, (SEMI | nl | opt_sep)?      (* sugar: name string *)
+  | ident, ws?, ":", ws?, type_ref, (SEMI | nl | opt_sep)?  (* canonical-ish *)
+  ;
+
+enum_decl       = "enum", ws, ident, ( ws, type_ref )?, ( ws?, ":", ws?, type_ref )?, ws?,
+                  block_like(enum_member_list) ;
+
+enum_member_list = { enum_member, opt_sep } ;
+enum_member      = ident, ( ws?, "=", ws?, const_expr )? ;
+
+variant_decl    = "variant", ws, ident, ( ws?, generic_params )?, ws?, variant_body ;
+
+variant_body    =
+    (* sugar block *)
+    block_like( variant_alt_list )
+  |
+    (* canonical single-line form: variant Maybe<T> = Some(T) | None *)
+    ws?, "=", ws?, variant_alt_canon, { ws?, PIPE, ws?, variant_alt_canon }, (SEMI | nl | EOF)
+  ;
+
+variant_alt_list = { variant_alt_sugar, opt_sep } ;
+
+variant_alt_sugar =
+    ident, ( ws, type_ref )?                         (* Some T | None *)
+  ;
+
+variant_alt_canon =
+    ident, ( ws?, LP, ws?, type_ref, ws?, RP )?
+  ;
+
+union_decl      = "union", ws, ident, ws?, block_like(union_field_list) ;
+union_field_list= { union_field, opt_sep } ;
+union_field     =
+    ident, ws, type_ref                               (* sugar: i i32 *)
+  | ident, ws?, ":", ws?, type_ref                    (* canonical *)
+  ;
+
+generic_params  =
+    LT, ws?, ident, { ws?, COMMA, ws?, ident }, ws?, GT
+  | ws, ident, { ws, ident }                          (* sugar: template T *)
+  ;
+
+(*=============================================================================
+  7) CAPABILITIES / CONTRACTS / MACROS / TEMPLATES
+=============================================================================*)
+
+capability_decl =
+    "capability", ws, ident, (SEMI | nl | EOF)        (* sugar: capability heap_alloc *)
+  | "capability", ws?, LP, ws?, ident, ws?, RP, (SEMI | nl | EOF)  (* canonical *)
+  ;
+
+requires_clause =
+    "requires", ws, cap_list
+  | "requires", ws?, LP, ws?, cap_list, ws?, RP
+  ;
+
+cap_list        = ident, { ws?, COMMA?, ws?, ident } ;
+
+contract_decl   =
+  "contract", ws, ident, ws, param_sugar, ws?, block_like(contract_stmt_list)
+  |
+  "contract", ws, ident, ws?, LP, ws?, param_list?, ws?, RP, ws?, block_like(contract_stmt_list)
+  ;
+
+contract_stmt_list = { contract_stmt, opt_sep } ;
+contract_stmt      =
+    "ensures", ws, expr
+  | "requires", ws, expr
+  | "assert", ws, expr, ( ws, string_lit )?
+  ;
+
+macro_decl      =
+    "macro", ws, ident, ws, macro_params_sugar?, ws?, "=", ws?, expr, (SEMI | nl | EOF)
+  |
+    "macro", ws, ident, ws?, LP, ws?, param_list?, ws?, RP, ws?, "=", ws?, expr, (SEMI | nl | EOF)
+  ;
+
+macro_params_sugar = ident, { ws, ident } ;
+
+template_decl   =
+    "template", ws, generic_params, opt_sep, proc_decl
+  |
+    "template", ws, LT, ws?, ident, { ws?, COMMA, ws?, ident }, ws?, GT, opt_sep, proc_decl
+  ;
+
+(*=============================================================================
+  8) GLOBAL VARS / RUNTIME OBJECTS
+=============================================================================*)
+
+global_var_decl =
+    "mutex", ws, ident, (SEMI | nl | EOF)
+  | "channel", ws?, ( generic_args | LT, ws?, type_ref, ws?, GT ), ws, ident, (SEMI | nl | EOF)
+  ;
+
+(*=============================================================================
+  9) PROCEDURES (SUGAR + CANONICAL)
+=============================================================================*)
+
+proc_decl       = attribute_list?, proc_head, ws?, block_like(stmt_list) ;
+
+proc_head       =
+  proc_prefix*, "proc", ws, ident,
+  ( ws?, generic_params )?,
+  ( ws, param_sugar_list )?,         (* sugar: proc f x i64 y i64 -> i64 *)
+  ( ws?, LP, ws?, param_list?, ws?, RP )?, (* canonical: proc f(x: i64, y: i64) -> i64 *)
+  ws?, ARROW, ws?, type_ref,
+  ( ws, requires_clause )?
+|
+  proc_prefix*, "fn", ws, ident,
+  ( ws?, generic_params )?,
+  ( ws, param_sugar_list )?,
+  ( ws?, LP, ws?, param_list?, ws?, RP )?,
+  ws?, ARROW, ws?, type_ref,
+  ( ws, requires_clause )?
+;
+
+proc_prefix     = "inline" | "static" | "extern" | "async" | "dedicate" ;
+
+(* canonical parameter list *)
+param_list      = param, { ws?, COMMA, ws?, param } ;
+param           = ident, ws?, ":", ws?, type_ref ;
+
+(* sugar parameter list: name type name type ... (no commas/colons/parens) *)
+param_sugar_list= param_sugar, { ws, param_sugar } ;
+param_sugar     = ident, ws, type_ref ;
+
+stmt_list       = { stmt, opt_sep } ;
+
+(*=============================================================================
+  10) STATEMENTS (SUGAR + CANONICAL)
+=============================================================================*)
+
+stmt            = block_stmt
+                | let_stmt
+                | set_stmt
+                | assign_stmt
+                | mutate_stmt
+                | add_by_stmt
+                | if_stmt
+                | while_stmt
+                | for_stmt
+                | return_stmt
+                | try_stmt
+                | throw_stmt
+                | trap_stmt
+                | halt_stmt
+                | with_stmt
+                | defer_stmt
+                | lock_stmt
+                | match_stmt
+                | switch_stmt
+                | decide_stmt
+                | pragma_stmt
+                | asm_stmt
+                | io_stmt
+                | mmio_stmt
+                | goto_stmt
+                | label_stmt
+                | expr_stmt
+                ;
+
+block_stmt      = block_like(stmt_list) ;
+
+(* declarations / bindings *)
+let_stmt        =
+    "let", ws, binding_sugar, ws?, "=", ws?, expr
+  | "let", ws, binding_sugar                           (* allow “let x i64” if you want *)
+  | "let", ws, binding_canon, ws?, "=", ws?, expr
+  ;
+
+set_stmt        =
+    "set", ws, binding_sugar, ws, "to", ws, expr
+  | "set", ws, lvalue, ws, "to", ws, expr              (* set h.version to 2 *)
+  ;
+
+binding_sugar   =
+    ident, ( ws, type_ref )?                           (* x i64 *)
+  | LP, ws?, bind_item, { ws?, COMMA?, ws?, bind_item }, ws?, RP  (* (x0 i64 x1 string ...) *)
+  ;
+
+bind_item       = ident, ws, type_ref ;
+
+binding_canon   =
+    ident, ws?, ":", ws?, type_ref
+  | LP, ws?, ident, ws?, ":", ws?, type_ref, { ws?, COMMA, ws?, ident, ws?, ":", ws?, type_ref }, ws?, RP
+  ;
+
+assign_stmt     =
+    lvalue, ws?, "=", ws?, expr
+  | lvalue, ws, "to", ws, expr
+  ;
+
+mutate_stmt     = "mutate", ws, lvalue, ws, "to", ws, expr ;
+add_by_stmt     = "add", ws, lvalue, ws, "by", ws, expr ;
+
+(* control flow *)
+if_stmt         =
+    "if", ws, expr, ws?, block_like(stmt_list), ( ws?, "else", ws?, block_like(stmt_list) )?
+  | "if", ws, expr, ws?, COLON, opt_sep, stmt_list, "end",
+    ( opt_sep, "else", ws?, COLON, opt_sep, stmt_list, "end" )?
+  ;
+
+while_stmt      =
+    "while", ws, expr, ws?, block_like(stmt_list)
+  | "while", ws, expr, ws?, COLON, opt_sep, stmt_list, "end"
+  ;
+
+for_stmt        =
+    "for", ws, for_header, ws?, block_like(stmt_list)
+  | "for", ws, for_header, ws?, COLON, opt_sep, stmt_list, "end"
+  ;
+
+for_header      =
+    (* C-style (your sugar still uses ; inside header) *)
+    "let", ws, ident, ws, type_ref, ws?, "=", ws?, expr, ws?, ";", ws?, expr, ws?, ";", ws?, expr
+  |
+    (* canonical C-style typed let *)
+    "let", ws, ident, ws?, ":", ws?, type_ref, ws?, "=", ws?, expr, ws?, ";", ws?, expr, ws?, ";", ws?, expr
+  |
+    (* range form *)
+    "let", ws, ident, ( ws, type_ref )?, ws, "in", ws, expr, ws?, "..", ws?, expr
+  ;
+
+return_stmt     = ("return" | "ret"), ( ws, expr )? ;
+throw_stmt      = "throw", ws, expr ;
+trap_stmt       = "trap", ( ws, expr )? ;
+halt_stmt       = "halt" ;
+
+try_stmt        =
+  "try", ws?, block_like(stmt_list),
+  { opt_sep, catch_clause },
+  ( opt_sep, finally_clause )?
+|
+  "try", ws?, COLON, opt_sep, stmt_list, "end",
+  { opt_sep, "catch", ws, ident, ws?, COLON, opt_sep, stmt_list, "end" },
+  ( opt_sep, "finally", ws?, COLON, opt_sep, stmt_list, "end" )?
+;
+
+catch_clause    =
+    "catch", ws?, LP, ws?, ident, ws?, RP, ws?, block_like(stmt_list)
+  | "catch", ws, ident, ws?, block_like(stmt_list)
+  ;
+
+finally_clause  = "finally", ws?, block_like(stmt_list) ;
+
+(* sugar verbs: with / defer / lock *)
+with_stmt       =
+    "with", ws, callish, ( ws, "as", ws, ident )?, ws?, block_like(stmt_list)
+  ;
+
+defer_stmt      =
+    "defer", ws, callish                              (* defer close f *)
+  | "defer", ws?, block_like(stmt_list)
+  ;
+
+lock_stmt       =
+    "lock", ws, expr, ws?, block_like(stmt_list)
+  | "lock", ws?, LP, ws?, expr, ws?, RP, ws?, block_like(stmt_list)
+  ;
+
+(* matching: match / switch / decide *)
+match_stmt      =
+    "match", ws, expr, ws?, block_like(match_arm_list)
+  | "match", ws, expr, ws?, COLON, opt_sep, match_arm_list, "end"
+  ;
+
+match_arm_list  = { match_arm, opt_sep } ;
+
+match_arm       =
+    "case", ws, pattern, ( ws, COLON, ws? )?, arm_body
+  | "default", ( ws, COLON, ws? )?, arm_body
+  ;
+
+arm_body        =
+    (* sugar: single-line arm: case 0: print "zero" *)
+    stmt_single
+  | block_like(stmt_list)
+  ;
+
+stmt_single     = stmt ; (* semantic: must be a single statement form *)
+
+switch_stmt     =
+    "switch", ws, expr, ws?, block_like(match_arm_list)
+  | "switch", ws, expr, ws?, COLON, opt_sep, match_arm_list, "end"
+  ;
+
+decide_stmt     =
+    "decide", ws, expr, ws?, block_like(match_arm_list)
+  | "decide", ws, expr, ws?, COLON, opt_sep, match_arm_list, "end"
+  ;
+
+pattern         =
+    "_" | int_lit | string_lit | bool_lit
+  | ident                                        (* binder or variant name (resolved by CIAM/type) *)
+  | ident, ws, ident                             (* sugar: Some x / None *)
+  | ident, ws?, LP, ws?, ident, ws?, RP          (* canonical: Some(x) *)
+  ;
+
+(* pragmas as statements too *)
+pragma_stmt     =
+    "#pragma", ws, ident, ( ws, expr )?, (SEMI | nl | EOF)
+  | "pragma", ws, string_lit, { ws, string_lit }, (SEMI | nl | EOF)
+  | "pragma", ws, string_lit, ws, string_lit, (SEMI | nl | EOF)
+  ;
+
+pragma_decl     = pragma_stmt ;
+define_decl     = "define", ws, ident, ws, const_expr, (SEMI | nl | EOF) ;
+
+(* asm block forms: asm: ... end  OR  asm { ... } *)
+asm_stmt        =
+    "asm", ws?, COLON, opt_sep, asm_line+, "end"
+  | "asm", ws?, LB, { ? asm_token ? }, RB
+  ;
+
+asm_line        = { ? not-end ? }, (nl | SEMI) ;
+
+(* I/O-ish calls as statements are just expr_stmt; included here for readability *)
+io_stmt         = expr_stmt ;
+
+(* MMIO statement forms *)
+mmio_stmt       =
+    "read32", ws, ident, ws, expr, ws, "into", ws, ident
+  | "write32", ws, ident, ws, expr, ws, expr
+  ;
+
+goto_stmt       =
+    "goto", ws, goto_cond, ws?, "->", ws?, ident, ws?, COMMA?, ws?, ident
+  ;
+goto_cond       = expr | LP, ws?, expr, ws?, RP ;
+
+label_stmt      =
+    "label", ws, ident, (SEMI | nl | EOF)
+  | "label", ws, ident, ws?, COLON
+  | "label", ws, ident, ws?, SEMI
+  ;
+
+expr_stmt       = expr ;
 
 (*=============================================================================
   11) EXPRESSIONS (supports both call styles)
@@ -98,7 +603,7 @@ postfix_tail    =
     ws?, LP, ws?, arg_list?, ws?, RP
   | ws?, DOT, ws?, ident
   | ws?, LS, ws?, expr, ws?, RS
-  | ws, "as", ws, type_ref
+  | ws,"as", ws, type_ref
   ;
 
 primary_expr    =
@@ -111,134 +616,139 @@ primary_expr    =
   | spawn_expr
   | join_expr
   | await_expr
+  | cast_expr
   | callish                              (* sugar call chaining *)
   | LP, ws?, expr, ws?, RP
   ;
 
 literal         = int_lit | float_lit | string_lit | bool_lit | null_lit ;
 
-(* Lowering for loops:
-   - convert to structured control flow (CF) graphs
-   - allow sharing of exit nodes
-  Translation:
-   for init; cond; iter
-    {
-      body
-    }
-   =>
-   B.entry:
-     <lower_init>
-     Jmp B.while.header
-   
-   B.while.header:
-     %c = <lower_cond_expr_into_temp>         ; yields i32/i64 predicate
-     JmpIfZero %c, B.while.exit, B.while.body
-   
-   B.while.body:
-     <lower_body_statements>
-     Jmp B.while.header
-   
-   B.while.exit:
-     ; continues with following code
+(* sugar calls:  f x y   OR  f "https://example"   OR  rane_rt_net.fetch_i64 "https://example" *)
+callish         =
+    path_ident, ( ws, call_arg )+         (* at least one arg in verb-call form *)
+  | path_ident, ws?, LP, ws?, arg_list?, ws?, RP
+  ;
 
-   for init, cond, iter:
-   {
-     body
-   }
-   =>
-   B.entry:
-     <lower_init_stmt>                          ; e.g., let i: i64 = 0
-     Jmp B.for.header
-  
-   B.for.header:
-     %c = <lower_cond_expr_into_temp>
-     JmpIfZero %c, B.for.exit, B.for.body
-  
-   B.for.body:
-     <lower_body_statements>
-     Jmp B.for.step
-  
-   B.for.step:
-     <lower_step_expr_or_stmt>                ; e.g., i = i + 1
-     Jmp B.for.header
-  
-   B.for.exit:
-     ; continues
+call_arg        = primary_expr ;
+
+arg_list        = expr, { ws?, COMMA, ws?, expr } ;
+
+(* struct literals: canonical + sugar *)
+struct_lit       =
+    (* canonical: Header{ magic: 1, ... } or Header: ... end (also used in node-prose) *)
+    type_ref, ws?, LB, ws?, struct_kv_list?, ws?, RB
+  | type_ref, ws?, COLON, opt_sep, struct_kv_list_sugar, "end"
+  ;
+
+struct_kv_list   = struct_kv, { ws?, COMMA, ws?, struct_kv } ;
+struct_kv        = ident, ws, ":", ws, expr ;
+
+struct_kv_list_sugar = { struct_kv_sugar, opt_sep } ;
+struct_kv_sugar  = ident, ws, expr ;
+
+array_lit        =
+    LS, ws?, expr, { ws?, COMMA?, ws?, expr }, ws?, RS
+  ;
+
+tuple_lit        =
+    LP, ws?, expr, { ws?, COMMA?, ws?, expr }, ws?, RP
+  ;
+
+choose_expr      =
+    "choose", ws, ("max" | "min"), ws, expr, ws, expr
+  | "choose", ws, ("max" | "min"), ws?, LP, ws?, expr, ws?, COMMA?, ws?, expr, ws?, RP
+  ;
+
+spawn_expr       =
+    "spawn", ws, callish
+  ;
+
+join_expr        =
+    "join", ws, expr
+  ;
+
+await_expr       =
+    "await", ws, callish
+  | "await", ws, expr
+  ;
+
+cast_expr        =
+    expr, ws, "as", ws, type_ref
+  ;
+
+lvalue           =
+    ident, { (ws?, DOT, ws?, ident) | (ws?, LS, ws?, expr, ws?, RS) }
+  ;
+
+(*=============================================================================
+  12) NODE/PROSE MINI-LANGUAGE (sugar) + canonical node blocks
+=============================================================================*)
+
+(* The file can contain multiple “module X” occurrences; the parser treats them
+   as separate module_decl items. Node/prose is a special module variant.
 *)
-; in B.entry
-%a0 = <lower_expr a>
-%b0 = <lower_expr b>
-Jmp B.for.header
 
-B.for.header:
-  %i = Phi (B.entry: %a0), (B.for.step: %i2)
-  %c = CmpLT %i, %b0
-  JmpIfZero %c, B.for.exit, B.for.body
+node_module_group =
+    node_module_decl, opt_sep, { node_item, opt_sep }, node_start_decl
+  | node_module_decl, opt_sep, { node_item, opt_sep }   (* start may be omitted, semantic error *)
+  ;
 
-B.for.body:
-  <lower_body_statements using %i>
-  Jmp B.for.step
+node_module_decl  = "module", ws, ident, (SEMI | nl | EOF) ;
 
-B.for.step:
-  %one = ConstI64 1
-  %i2 = Add %i, %one
-  Jmp B.for.header
+node_item         = node_block_decl ;
 
-B.for.exit:
+node_block_decl   =
+    "node", ws, ident, ws?, COLON, opt_sep,
+      { node_stmt, opt_sep },
+    "end"
+  ;
 
-; assume we're in some block and want %r
-%a = <lower a>
-JmpIfZero %a, B.and.false, B.and.eval_b
+node_start_decl   = "start", ws, "at", ws, "node", ws, ident, (SEMI | nl | EOF)? ;
 
-B.and.eval_b:
-  %b = <lower b>
-  JmpIfZero %b, B.and.false, B.and.true
+node_stmt         =
+    node_set_stmt
+  | node_add_stmt
+  | node_say_stmt
+  | node_go_stmt
+  | node_halt_stmt
+  | node_trap_stmt
+  ;
 
-B.and.false:
-  %r0 = ConstI32 0
-  Jmp B.and.join
+node_set_stmt     =
+    "set", ws, ident, ws, type_ref, ws, "to", ws, node_value
+  | "set", ws, lvalue, ws, "to", ws, expr
+  | "set", ws, ident, ws, "to", ws, expr
+  ;
 
-B.and.true:
-  %r1 = ConstI32 1
-  Jmp B.and.join
+(* node_value can be a struct_lit in sugar form: Header: ... end *)
+node_value        = struct_lit | expr ;
 
-B.and.join:
-  %r = Phi (B.and.false: %r0), (B.and.true: %r1)
+node_add_stmt     = "add", ws, lvalue, ws, "by", ws, expr ;
+node_say_stmt     = "say", ws, expr ;
+node_go_stmt      = "go", ws, "to", ws, "node", ws, ident ;
+node_halt_stmt    = "halt" ;
+node_trap_stmt    = "trap", ( ws, expr )? ;
 
-%a = <lower a>
-JmpIfZero %a, B.or.test_b, B.true
+(*=============================================================================
+  13) BLOCK FORMS
+=============================================================================*)
 
-B.or.test_b:
-  %b = <lower b>
-  JmpIfZero %b, B.false, B.true
+(* block_like(X) means either:
+    - canonical braces: { X }
+    - sugar colon + end: : X end
+*)
 
-B.false:
-  %r0 = ConstI32 0
-  Jmp B.or.join
+block_like(X)     = brace_block(X) | colon_end_block(X) ;
 
-B.true:
-  %r1 = ConstI32 1
-  Jmp B.or.join
+brace_block(X)    = LB, opt_sep, X, opt_sep, RB ;
+colon_end_block(X)= COLON, opt_sep, X, opt_sep, "end" ;
 
-B.or.join:
-  %r = Phi (B.or.false: %r0), (B.or.true: %r1)
+(*=============================================================================
+  14) CANONICAL-ONLY OPTIONALS (accepted everywhere)
+=============================================================================*)
 
-; want: if (a and b) goto B.true else B.false
+(* Allow semicolons after declarations in canonical files. Already included by opt_sep. *)
 
-%a = <lower a>
-JmpIfZero %a, B.false, B.and.test_b
-
-B.and.test_b:
-  %b = <lower b>
-  JmpIfZero %b, B.false, B.true
-
-Jmp B1
-B1:
-  %x = Load %slot_x
-  %ten = ConstI64 10
-  %c = CmpLT %x, %ten
-  JmpIfZero %c, B3, B2
-B2:
-  ...
-  Jmp B1
-B3:
+(*=============================================================================
+  15) END
+=============================================================================*)
