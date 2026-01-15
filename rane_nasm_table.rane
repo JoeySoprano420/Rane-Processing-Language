@@ -1,0 +1,865 @@
+// rane_nasm_table.rane
+// EXECUTABLE 1:1 RANE → NASM-x64 table (Windows x64 ABI)
+// Scope: the constructs shown in your demo + the minimal RANE Spec 0.1 core.
+// Model: RANE lowers to a small Typed-CIL instruction set; THIS TABLE maps each CIL op 1:1 to NASM templates.
+//
+// Conventions
+// - {dst},{src},{a},{b},{tmp} are physical regs or stack slots chosen by regalloc.
+// - {imm} is an immediate (fits where noted; otherwise use MOVABS helper).
+// - {lbl} is a label symbol.
+// - Stack slots are written like [rbp-{off}] or [rsp+{off}] depending on frame style.
+// - Integer sizes: i32 uses eax/edx/etc; i64 uses rax/rdx/etc.
+// - Windows x64 ABI: args in RCX,RDX,R8,R9; 32-byte shadow space; stack 16-byte aligned at CALL.
+// - For division/mod: RAX/RDX implicit. For calls: preserve non-volatile regs (RBX,RBP,RDI,RSI,R12–R15).
+//
+// What makes this “executable”:
+// - It’s a concrete mapping table you can compile into your codegen as data.
+// - Templates are real NASM lines; a tiny expander can substitute placeholders and emit .asm.
+
+module rane_codegen_table
+
+namespace rane_nasm:
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 0) Data model for the table
+  ///////////////////////////////////////////////////////////////////////////
+
+  enum Width i32:
+    W8  = 8
+    W16 = 16
+    W32 = 32
+    W64 = 64
+  end
+
+  enum Kind i32:
+    Prolog
+    Epilog
+    Move
+    Lea
+    Load
+    Store
+    BinOp
+    UnOp
+    Cmp
+    Setcc
+    Branch
+    Call
+    Ret
+    Label
+    Trap
+    InlineAsm
+    Comment
+  end
+
+  struct Entry:
+    op string          # canonical op name, e.g. "i64.add", "br.if"
+    kind Kind
+    width Width        # meaningful for typed ops
+    form string        # short signature, e.g. "dst, a, b" or "cond, lbl_t, lbl_f"
+    nasm [8]string     # up to 8 lines (keep fixed-size for simple embedding)
+  end
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 1) Helper macro-templates (referenced by entries)
+  ///////////////////////////////////////////////////////////////////////////
+
+  // MOVABS64: load any 64-bit immediate into a register (NASM: mov r64, imm64)
+  const MOVABS64_0 string = "mov {dst}, {imm64}"
+
+  // ABS_LOAD32: eax = *(u32*)ABS(imm64)  (via tmp)
+  const ABS_LOAD32_0 string = "mov {tmp}, {addr64}"
+  const ABS_LOAD32_1 string = "mov eax, dword [{tmp}]"
+
+  // ABS_STORE32: *(u32*)ABS(imm64) = eax (via tmp)
+  const ABS_STORE32_0 string = "mov {tmp}, {addr64}"
+  const ABS_STORE32_1 string = "mov dword [{tmp}], eax"
+
+  // CALL_ABI: Windows x64 shadow space + alignment convention
+  const CALL_ABI_0 string = "sub rsp, {shadow_and_align}"  # typically 40h if you also align
+  const CALL_ABI_1 string = "call {sym}"
+  const CALL_ABI_2 string = "add rsp, {shadow_and_align}"
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 2) Table: prolog/epilog (frame-based)
+  ///////////////////////////////////////////////////////////////////////////
+
+  const TABLE [128]Entry = [
+
+    Entry:
+      op "fn.prolog"
+      kind Kind.Prolog
+      width Width.W64
+      form "frame_size, save_nonvol"
+      nasm [
+        "push rbp"
+        "mov rbp, rsp"
+        "sub rsp, {frame_size_aligned}"
+        "; save non-volatiles if used (rbx,rdi,rsi,r12-r15)"
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "fn.epilog"
+      kind Kind.Epilog
+      width Width.W64
+      form "frame_size, restore_nonvol"
+      nasm [
+        "; restore non-volatiles if saved"
+        "mov rsp, rbp"
+        "pop rbp"
+        "ret"
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // 3) Moves / constants
+    ///////////////////////////////////////////////////////////////////////////
+
+    Entry:
+      op "i64.mov"
+      kind Kind.Move
+      width Width.W64
+      form "dst, src"
+      nasm [
+        "mov {dst}, {src}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i32.mov"
+      kind Kind.Move
+      width Width.W32
+      form "dst32, src32"
+      nasm [
+        "mov {dst32}, {src32}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.const"
+      kind Kind.Move
+      width Width.W64
+      form "dst, imm"
+      nasm [
+        "mov {dst}, {imm64}"   # if imm fits signed 32, encoder will pick shorter
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.const.abs"
+      kind Kind.Move
+      width Width.W64
+      form "dst, imm64"
+      nasm [
+        "mov {dst}, {imm64}"   # MOVABS64
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "addr.lea"
+      kind Kind.Lea
+      width Width.W64
+      form "dst, base, index, scale, disp"
+      nasm [
+        "lea {dst}, [{base} + {index}*{scale} + {disp}]"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // 4) Loads / stores (stack / heap / pointers)
+    ///////////////////////////////////////////////////////////////////////////
+
+    Entry:
+      op "i64.load"
+      kind Kind.Load
+      width Width.W64
+      form "dst, addr_reg, disp"
+      nasm [
+        "mov {dst}, qword [{addr_reg} + {disp}]"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i32.load"
+      kind Kind.Load
+      width Width.W32
+      form "dst32, addr_reg, disp"
+      nasm [
+        "mov {dst32}, dword [{addr_reg} + {disp}]"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.store"
+      kind Kind.Store
+      width Width.W64
+      form "addr_reg, disp, src"
+      nasm [
+        "mov qword [{addr_reg} + {disp}], {src}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i32.store"
+      kind Kind.Store
+      width Width.W32
+      form "addr_reg, disp, src32"
+      nasm [
+        "mov dword [{addr_reg} + {disp}], {src32}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // 5) Arithmetic / bitwise (i64)
+    ///////////////////////////////////////////////////////////////////////////
+
+    Entry:
+      op "i64.add"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, b"
+      nasm [
+        "mov {dst}, {a}"
+        "add {dst}, {b}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.sub"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, b"
+      nasm [
+        "mov {dst}, {a}"
+        "sub {dst}, {b}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.mul"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, b"
+      nasm [
+        "mov {dst}, {a}"
+        "imul {dst}, {b}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    // Signed div: dst = a / b
+    Entry:
+      op "i64.div"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, b, tmp"
+      nasm [
+        "mov rax, {a}"
+        "cqo"                 # sign-extend rax into rdx:rax
+        "idiv {b}"            # quotient in rax, remainder in rdx
+        "mov {dst}, rax"
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    // Signed mod: dst = a % b
+    Entry:
+      op "i64.mod"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, b"
+      nasm [
+        "mov rax, {a}"
+        "cqo"
+        "idiv {b}"
+        "mov {dst}, rdx"
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.and"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, b"
+      nasm [
+        "mov {dst}, {a}"
+        "and {dst}, {b}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.or"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, b"
+      nasm [
+        "mov {dst}, {a}"
+        "or {dst}, {b}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.xor"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, b"
+      nasm [
+        "mov {dst}, {a}"
+        "xor {dst}, {b}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.shl"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, shamt"
+      nasm [
+        "mov {dst}, {a}"
+        "mov cl, {shamt8}"     # shift count in CL for variable shifts
+        "shl {dst}, cl"
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.shr"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, shamt"
+      nasm [
+        "mov {dst}, {a}"
+        "mov cl, {shamt8}"
+        "shr {dst}, cl"
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.sar"
+      kind Kind.BinOp
+      width Width.W64
+      form "dst, a, shamt"
+      nasm [
+        "mov {dst}, {a}"
+        "mov cl, {shamt8}"
+        "sar {dst}, cl"
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // 6) Unary (i64 / bool)
+    ///////////////////////////////////////////////////////////////////////////
+
+    Entry:
+      op "i64.neg"
+      kind Kind.UnOp
+      width Width.W64
+      form "dst, a"
+      nasm [
+        "mov {dst}, {a}"
+        "neg {dst}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.notbits"
+      kind Kind.UnOp
+      width Width.W64
+      form "dst, a"
+      nasm [
+        "mov {dst}, {a}"
+        "not {dst}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    // bool.not: dst = (a == 0) ? 1 : 0  (a is i8/i32/i64—normalize to cmp)
+    Entry:
+      op "bool.not"
+      kind Kind.UnOp
+      width Width.W32
+      form "dst8, a"
+      nasm [
+        "cmp {a}, 0"
+        "sete {dst8}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // 7) Comparisons (i64 -> bool in {dst8})
+    ///////////////////////////////////////////////////////////////////////////
+
+    Entry:
+      op "i64.cmp.lt"
+      kind Kind.Cmp
+      width Width.W64
+      form "dst8, a, b"
+      nasm [
+        "cmp {a}, {b}"
+        "setl {dst8}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.cmp.le"
+      kind Kind.Cmp
+      width Width.W64
+      form "dst8, a, b"
+      nasm [
+        "cmp {a}, {b}"
+        "setle {dst8}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.cmp.gt"
+      kind Kind.Cmp
+      width Width.W64
+      form "dst8, a, b"
+      nasm [
+        "cmp {a}, {b}"
+        "setg {dst8}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.cmp.ge"
+      kind Kind.Cmp
+      width Width.W64
+      form "dst8, a, b"
+      nasm [
+        "cmp {a}, {b}"
+        "setge {dst8}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.cmp.eq"
+      kind Kind.Cmp
+      width Width.W64
+      form "dst8, a, b"
+      nasm [
+        "cmp {a}, {b}"
+        "sete {dst8}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "i64.cmp.ne"
+      kind Kind.Cmp
+      width Width.W64
+      form "dst8, a, b"
+      nasm [
+        "cmp {a}, {b}"
+        "setne {dst8}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // 8) Branching / labels / goto
+    ///////////////////////////////////////////////////////////////////////////
+
+    Entry:
+      op "label"
+      kind Kind.Label
+      width Width.W64
+      form "lbl"
+      nasm [
+        "{lbl}:"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    // br: unconditional
+    Entry:
+      op "br"
+      kind Kind.Branch
+      width Width.W64
+      form "lbl"
+      nasm [
+        "jmp {lbl}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    // br.if: cond is a boolean in a register/slot
+    Entry:
+      op "br.if"
+      kind Kind.Branch
+      width Width.W32
+      form "cond, lbl_true, lbl_false"
+      nasm [
+        "cmp {cond}, 0"
+        "jne {lbl_true}"
+        "jmp {lbl_false}"
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    // goto (cond) -> L_true L_false (your syntax)
+    Entry:
+      op "goto.cond"
+      kind Kind.Branch
+      width Width.W32
+      form "cond, lbl_true, lbl_false"
+      nasm [
+        "cmp {cond}, 0"
+        "jne {lbl_true}"
+        "jmp {lbl_false}"
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // 9) Calls / returns (Windows x64 ABI)
+    ///////////////////////////////////////////////////////////////////////////
+
+    // call.sym: direct call to symbol; args assumed already in rcx,rdx,r8,r9 and stack as needed
+    Entry:
+      op "call.sym"
+      kind Kind.Call
+      width Width.W64
+      form "sym, shadow_and_align"
+      nasm [
+        "sub rsp, {shadow_and_align}"
+        "call {sym}"
+        "add rsp, {shadow_and_align}"
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    // ret: return value already in rax/eax
+    Entry:
+      op "ret"
+      kind Kind.Ret
+      width Width.W64
+      form "void"
+      nasm [
+        "ret"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // 10) MMIO / absolute addr helpers (matches your mmio_demo + addr/load/store demo intent)
+    ///////////////////////////////////////////////////////////////////////////
+
+    // read32 REG off into x
+    // Model: base address of REG is an absolute 64-bit constant known at compile-time.
+    Entry:
+      op "mmio.read32.abs"
+      kind Kind.Load
+      width Width.W32
+      form "dst32, addr64, off, tmp"
+      nasm [
+        "mov {tmp}, {addr64}"
+        "mov {dst32}, dword [{tmp} + {off}]"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    // write32 REG off imm
+    Entry:
+      op "mmio.write32.abs"
+      kind Kind.Store
+      width Width.W32
+      form "addr64, off, src32, tmp"
+      nasm [
+        "mov {tmp}, {addr64}"
+        "mov dword [{tmp} + {off}], {src32}"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    // addr 4096 4 8 16  (treat as base + index*scale + disp)
+    Entry:
+      op "addr.form4"
+      kind Kind.Lea
+      width Width.W64
+      form "dst, base, scale, index, disp"
+      nasm [
+        "lea {dst}, [{base} + {index}*{scale} + {disp}]"
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // 11) Trap / halt (debug + termination)
+    ///////////////////////////////////////////////////////////////////////////
+
+    Entry:
+      op "trap"
+      kind Kind.Trap
+      width Width.W64
+      form "opt(code)"
+      nasm [
+        "int3"                # debugger break; you can swap to 'ud2' if preferred
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+    Entry:
+      op "halt"
+      kind Kind.Trap
+      width Width.W64
+      form "void"
+      nasm [
+        "ud2"                 # guaranteed invalid opcode (hard stop)
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
+      ]
+    end
+
+  ]  # end TABLE
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 12) “1:1” notes (what is *not* direct NASM)
+  ///////////////////////////////////////////////////////////////////////////
+  //
+  // Some surface constructs are not single-instruction concepts; they lower first:
+  // - match/switch/decide  -> compare + conditional branches (br.if, br, labels)
+  // - if/while/for         -> labels + br/br.if (+ compare ops)
+  // - async/await          -> state-machine in Typed CIL, then normal calls/branches
+  // - try/catch/finally    -> runtime personality + tables OR explicit lowering (not single-op)
+  // - with/defer/lock      -> structured lowering to try/finally + calls
+  //
+  // The “1:1” claim here is strict from Typed CIL → NASM templates.
+
+end
