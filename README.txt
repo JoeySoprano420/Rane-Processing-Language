@@ -2,7 +2,26 @@
 
 Reliable Adaptive Natural Efficient (RANE Proccessing Language) Create a programmjng language --processing ideas (through instructions) to execution-- P.I.E.
 
-source -> Syntax Map Diagram (SMD) -> Typed Common Intermediary Language (Typedd CIL) -> Optimized Structure Web -> Codegen (.exe x64 PE)
+syntax.rane
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Lexer / Tokenizer
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Parser
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+AST
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Resolver
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Typed CIL (Typed Common Intermediary Language)
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+OSW (Optimized Structure Web)
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Frame Planner
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Codegen (.exe x64 PE) / NASM Emitters
+
+
+
 
 * Reliable Adaptive Natural Efficient (RANE Proccessing Language)
 Create a programmjng language  
