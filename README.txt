@@ -3,7 +3,7 @@
 **Reliable Adaptive Natural Efficient (RANE Processing Language)**
 **P.I.E. = Processing Ideas → Instructions → Execution**
 
-RANE is designed as a *systems whisperer*: you write clear, human-shaped instructional prose, and the toolchain deterministically turns it into machine-operable structure and then into real Windows x86-64 PE executable code.
+RANE is designed as a *systems whisperer*: we write clear, human-shaped instructional prose, and the toolchain deterministically turns it into machine-operable structure and then into real Windows x86-64 PE executable code.
 
 RANE’s identity is not “a syntax that compiles.” It’s an **execution civilization**: language + staged transformations + capability security + deterministic concurrency + inspectable IR + an emitter that can produce `.exe` output.
 
@@ -19,8 +19,8 @@ RANE’s identity is not “a syntax that compiles.” It’s an **execution civ
 
 ### 1.1 “Processing ideas”
 
-This is the phase where you’re still thinking like a human: *What do I want done?*
-RANE supports this by letting your code read like:
+This is the phase where we’re still thinking like a human: *What do I want done?*
+RANE supports this by letting our code read like:
 
 * “with open path as f”
 * “defer close f”
@@ -29,7 +29,7 @@ RANE supports this by letting your code read like:
 * “choose max a b”
 * “requires network_io”
 
-RANE is intentionally shaped so your **intent** remains visible even when the compiler becomes aggressive.
+RANE is intentionally shaped so our **intent** remains visible even when the compiler becomes aggressive.
 
 ### 1.2 “Instructions”
 
@@ -154,9 +154,9 @@ This stage computes:
 * alignment padding
 * Windows x64 shadow space requirements
 * call-site alignment rules
-* debug/unwind metadata hooks (if you support it)
+* debug/unwind metadata hooks (if we support it)
 
-Output: frame map + per-proc layout + calling convention compliance plan.
+Output: frame map + per-proc lawet + calling convention compliance plan.
 
 #### Stage I — Codegen / Emitter
 
@@ -272,7 +272,7 @@ Meaning:
 
 * Human-friendly: prose-like blocks, minimal punctuation, readable flow.
 * Machine-natural: every construct maps to a finite set of canonical IR forms.
-* You don’t write “compiler-bait”; you write “instruction truth.”
+* We don’t write “compiler-bait”; we write “instruction truth.”
 
 ### 4.3 “Grammar is cohesive and human-oriented”
 
@@ -326,7 +326,7 @@ Meaning:
   * stack slots for locals/temps
   * virtual registers in IR
   * physical registers assigned late
-* You get predictable performance while keeping readability.
+* We get predictable performance while keeping readability.
 
 ### 4.7 “Dynamic AOT compilation”
 
@@ -343,13 +343,13 @@ Meaning:
 
 Meaning:
 
-* If you don’t import runtime services, you don’t pay for them.
-* You can compile a “freestanding-ish” subset:
+* If we don’t import runtime services, we don’t pay for them.
+* We can compile a “freestanding-ish” subset:
 
   * no heap
   * no IO
   * no threads
-* When you *do* want services, you explicitly import and require capabilities.
+* When we *do* want services, we explicitly import and require capabilities.
 
 ### 4.9 “Intrinsic instruction set by design”
 
@@ -399,9 +399,9 @@ Meaning:
 
 ---
 
-## 5) Core language surface (what your syntax demonstrates)
+## 5) Core language surface (what our syntax demonstrates)
 
-I’m going to treat your provided syntax as **canonical supported forms** and explain each category:
+I’m going to treat our provided syntax as **canonical supported forms** and explain each category:
 
 ---
 
@@ -470,7 +470,7 @@ export inline proc square(x: i64) -> i64 { return x * x; }
 ### 7.2 Visibility keywords
 
 * `public`: callable by other modules (subject to export policy)
-* `protected`: callable within module + friend scopes (depending on your rules)
+* `protected`: callable within module + friend scopes (depending on our rules)
 * `private`: callable only inside namespace/module scope
 * `admin`: elevated scope (often for privileged capabilities or internal runtime glue)
 
@@ -488,7 +488,7 @@ Visibility controls:
 
 ### 8.1 Primitive declarations
 
-You list:
+We list:
 
 * signed ints: `i8 ... i512`
 * unsigned ints: `u8 ... u512`
@@ -511,7 +511,7 @@ Regardless, by the time Typed CIL exists, these are concrete types with known:
 
 ### 8.2 `typealias` and `alias`
 
-* `typealias word = u32`: introduces a named alias that preserves type identity rules you define (could be “strong alias”)
+* `typealias word = u32`: introduces a named alias that preserves type identity rules we define (could be “strong alias”)
 * `alias int32 = i32`: often a “weak alias” (pure synonym)
 
 **Important distinction (recommended):**
@@ -566,13 +566,13 @@ Meaning:
 * Derive generates:
 
   * procs or methods in Typed CIL/OSW
-  * or runtime-vtable-like hooks if you ever choose that (but your “runtime-free by default” suggests avoid vtables)
+  * or runtime-vtable-like hooks if we ever choose that (but our “runtime-free by default” suggests avoid vtables)
 
 ### 10.2 `struct Person: name string age u8 end`
 
 * field list
-* deterministic layout (C-like)
-* no hidden padding decisions: layout is defined and inspectable
+* deterministic lawet (C-like)
+* no hidden padding decisions: lawet is defined and inspectable
 
 ### 10.3 `enum Flags u8: ... end`
 
@@ -630,7 +630,7 @@ Defines a named memory-mapped IO region:
 
 ### 11.4 `addr/load/store` forms
 
-Your examples:
+Our examples:
 
 * `let p0 = addr 4096 4 8 16`
 * `load u32 addr 4096 0 1 0`
@@ -656,7 +656,7 @@ These read like an address-construction DSL:
 
 ### 12.1 Capability declarations
 
-You define:
+We define:
 
 * `capability heap_alloc`
 * `capability file_io`
@@ -685,11 +685,11 @@ Meaning:
 
 ### 12.3 Why this matters
 
-This is your “security is compile time centric” line made real:
+This is our “security is compile time centric” line made real:
 
-* You can’t accidentally do IO.
-* You can’t “accidentally” spawn threads.
-* You can’t hide `eval` inside some helper; it contaminates the call chain unless explicitly permitted.
+* We can’t accidentally do IO.
+* We can’t “accidentally” spawn threads.
+* We can’t hide `eval` inside some helper; it contaminates the call chain unless explicitly permitted.
 
 ---
 
@@ -710,7 +710,7 @@ Meaning:
 * can be enforced:
 
   * purely compile-time (when provable)
-  * optionally runtime (if you choose), but your model leans compile-time-first
+  * optionally runtime (if we choose), but our model leans compile-time-first
 
 ### 13.2 Assertions
 
@@ -754,7 +754,7 @@ end
 Meaning:
 
 * monomorphization: `generic_id<i64>` becomes a concrete proc
-* type constraints can be added later (if you want)
+* type constraints can be added later (if we want)
 * expands into Typed CIL specialized copies
 
 ---
@@ -775,11 +775,11 @@ Meaning:
   * a dispatch switch on state index
 * determinism:
 
-  * scheduling must be explicit or stable per your `pragma "scheduling" "fair"`
+  * scheduling must be explicit or stable per our `pragma "scheduling" "fair"`
 
 ### 15.2 `dedicate proc` + `spawn/join`
 
-Your intent:
+Our intent:
 
 * `dedicate` signals “this proc is meant to be run as a worker”
 * `spawn` creates a thread task handle
@@ -837,11 +837,11 @@ Meaning:
 * `borrow` returns a non-owning reference
 * `free` consumes ownership
 
-**Compile-time safety options (depending on how strict you want):**
+**Compile-time safety options (depending on how strict we want):**
 
 * forbid `free p` while `q` is live
 * or require `q` be dropped/ended before free
-* or allow but mark as unsafe (you didn’t include `unsafe`, so best is to enforce structurally)
+* or allow but mark as unsafe (we didn’t include `unsafe`, so best is to enforce structurally)
 
 ---
 
@@ -851,7 +851,7 @@ Meaning:
 
 * Expressions evaluate left-to-right.
 * Conditions are explicit booleans.
-* No “truthy” ambiguity unless you define it (you show `if (f & Flags.Write):`, so you likely define nonzero → true only for `bool` or provide an explicit rule for flags).
+* No “truthy” ambiguity unless we define it (we show `if (f & Flags.Write):`, so we likely define nonzero → true only for `bool` or provide an explicit rule for flags).
 
 ### 17.2 Loops
 
@@ -877,7 +877,7 @@ Lowering:
 
 ### 17.4 `switch` and `decide`
 
-You keep distinct keywords because they can carry different semantic intent:
+We keep distinct keywords because they can carry different semantic intent:
 
 * `switch` = standard branching
 * `decide` = “decision table” semantics, can map to jump tables more aggressively
@@ -922,7 +922,7 @@ Meaning:
 A strict design:
 
 * only allows named output binds (`mov out rax`)
-* requires capability `syscalls` or `unsafe_asm` (you used `syscalls`)
+* requires capability `syscalls` or `unsafe_asm` (we used `syscalls`)
 
 ---
 
@@ -932,7 +932,7 @@ RANE includes:
 
 * recoverable flow (`throw`, `catch`)
 * deterministic cleanup (`finally`)
-* structural lowering into explicit control flow (not mystical stack unwinding unless you implement real SEH)
+* structural lowering into explicit control flow (not mystical stack unwinding unless we implement real SEH)
 
 **Possible lowering strategies:**
 
@@ -940,7 +940,7 @@ RANE includes:
 2. **Explicit error-return + handler blocks** (simpler, deterministic, auditable)
 3. **Trap-based** for “no exceptions mode”
 
-Given your “runtime-free by default,” the simplest consistent approach is:
+Given our “runtime-free by default,” the simplest consistent approach is:
 
 * lower `throw` into a structured error return or a jump to a handler block
 * `try/catch` becomes a decision region
@@ -967,13 +967,13 @@ Meaning:
   * sandbox it
   * or require explicit trust policies
 
-This is exactly how you keep “professional language” + “security compile-time centric.”
+This is exactly how we keep “professional language” + “security compile-time centric.”
 
 ---
 
-## 21) Operators: your full operator set, with rules
+## 21) Operators: our full operator set, with rules
 
-You demonstrate:
+We demonstrate:
 
 * unary: `-`, `not`, `!`, `~`
 * arithmetic: `+ - * / %`
@@ -1016,7 +1016,7 @@ Meaning:
 
 Lowering:
 
-* into immediate IDs (integers) or pointers (if you build a symbol table blob)
+* into immediate IDs (integers) or pointers (if we build a symbol table blob)
 
 ---
 
@@ -1043,7 +1043,7 @@ Meaning:
 * `go to node` is a jump
 * `start at node start` defines entrypoint for this module’s node graph
 
-This gives you:
+This gives we:
 
 * visualizable CFG
 * deterministic scheduling
@@ -1071,7 +1071,7 @@ By the time something is Typed CIL:
 
 ### 24.3 Why Typed CIL exists (the practical reason)
 
-If you skip a stable typed IR, you end up with:
+If we skip a stable typed IR, we end up with:
 
 * scattered lowering logic
 * duplicated rules
@@ -1086,10 +1086,10 @@ Typed CIL is the “single truth” the rest of the compiler can trust.
 
 ### 25.1 Why “web”
 
-Because optimization is not one-dimensional. You have:
+Because optimization is not one-dimensional. We have:
 
 * prerequisites (type facts, alias facts, capability facts)
-* mutual exclusions (can’t inline after some transforms if you want debug fidelity)
+* mutual exclusions (can’t inline after some transforms if we want debug fidelity)
 * multiple routes to the same end (jump table vs if-chain)
 * target-driven decisions (size vs speed)
 
@@ -1099,7 +1099,7 @@ So OSW is:
 * dependencies as edges
 * CIAMs can inject edges (“prefer pattern X if pragma says hot”)
 
-### 25.2 What OSW *does* to your constructs
+### 25.2 What OSW *does* to our constructs
 
 * `match/switch/decide` → decision tree + jump table selection
 * `async/await` → state machine lowering
@@ -1133,7 +1133,7 @@ For each proc:
 * alignment padding
 * final frame size
 
-Output is a **map** from IR locals/temps → `[rsp+offset]` (or `[rbp-offset]` if you use frame pointers).
+Output is a **map** from IR locals/temps → `[rsp+offset]` (or `[rbp-offset]` if we use frame pointers).
 
 ---
 
@@ -1156,7 +1156,7 @@ RANE emphasizes determinism, so register allocation should be:
 * stable given identical input
 * reproducible across machines
 
-You can choose:
+We can choose:
 
 * linear scan (deterministic, simpler)
 * graph coloring (more optimal, more complex)
@@ -1177,7 +1177,7 @@ The emitter must build:
 
 ### 28.1 Intuitive build system
 
-Your philosophy implies:
+Our philosophy implies:
 
 * builds are declarative and deterministic
 * “package manager baked into sequential render and export logic”
@@ -1195,7 +1195,7 @@ Because CIAMs operate everywhere, tooling can:
 * show IR at every boundary
 * show capability flow (why a call is forbidden)
 * show ownership flow (why borrow is invalid)
-* show frame layout (why alignment changed)
+* show frame lawet (why alignment changed)
 
 ---
 
@@ -1240,9 +1240,9 @@ If used, it must remain:
 
 ---
 
-## 31) Putting it all together: what your provided program demonstrates
+## 31) Putting it all together: what our provided program demonstrates
 
-Your program is effectively a **total coverage file**:
+Our program is effectively a **total coverage file**:
 
 * imports, modules, namespaces
 * procs of all visibilities
@@ -1289,7 +1289,7 @@ RANE is positioned to be:
 
 ## 33) The complete mental model in one final “execution story”
 
-You write:
+We write:
 
 * a set of instructional declarations and command nodes
 
@@ -1325,7 +1325,7 @@ The result:
 > **Notation**
 
 * **Surface grammar** shown in a readable EBNF-ish style (indent blocks implied).
-* **Typed CIL** shown in your punctuated canonical form.
+* **Typed CIL** shown in our punctuated canonical form.
 * Types: `i8..i512`, `u8..u512`, `f32..f128`, `bool`, `void`, `int`, `string`, plus user types.
 * Capabilities are compile-time effects: `requires(cap)` is mandatory for using guarded operations.
 * Diagnostics are described as: **CODE** — message — typical location.
@@ -1472,7 +1472,7 @@ module <ident>;
 
 ### Typing Rules
 
-* Exactly one `module` per compilation unit (unless you implement multi-module files).
+* Exactly one `module` per compilation unit (unless we implement multi-module files).
 * Defines a symbol namespace root.
 
 ### Capability Rules
@@ -1579,7 +1579,7 @@ Affects mangled names only.
 
 ### x64 Patterns
 
-* Exported functions: present in export metadata (if you implement PE exports).
+* Exported functions: present in export metadata (if we implement PE exports).
 
 ### Diagnostics
 
@@ -1625,7 +1625,7 @@ type <ident>;
 ### Typing Rules
 
 * For builtins: registers them into the compilation environment.
-* If user-defined `type` is allowed: it becomes an opaque nominal type (you didn’t show that use, so treat as builtin registration).
+* If user-defined `type` is allowed: it becomes an opaque nominal type (we didn’t show that use, so treat as builtin registration).
 
 ### Capability Rules
 
@@ -1677,7 +1677,7 @@ alias <Name> = <Type>;
 * `typealias`: distinct nominal identity but same representation; implicit conversion rules must be defined.
 
   * Safe rule: no implicit conversion; require `as` cast.
-  * Or allow implicit widening if you want.
+  * Or allow implicit widening if we want.
 
 ### Capability Rules
 
@@ -1891,7 +1891,7 @@ None.
 ### Lowering
 
 * **CIAM@resolver:** bind struct type symbol.
-* **CIAM@typed-CIL:** compute layout (size, align, offsets).
+* **CIAM@typed-CIL:** compute lawet (size, align, offsets).
 
 ### OSW Expectations
 
@@ -1931,7 +1931,7 @@ enum <Name> : <ReprType> { ... }
 ### Typing Rules
 
 * Values must be representable in repr type.
-* If no value given, you may define auto-increment rules (not shown; assume explicit or simple defaulting).
+* If no value given, we may define auto-increment rules (not shown; assume explicit or simple defaulting).
 
 ### Capability Rules
 
@@ -1974,7 +1974,7 @@ end
 variant <Name><T> = Case(T) | None
 ```
 
-(or your struct-style variant form)
+(or our struct-style variant form)
 
 ### Typing Rules
 
@@ -2033,12 +2033,12 @@ union <Name> { ... }
 
 ### Typing Rules
 
-* All fields share storage; reading a different field than last written may be undefined unless you define rules.
-* You can require explicit casts or “active field” tracking (not shown; simplest is “unsafe by convention”).
+* All fields share storage; reading a different field than last written may be undefined unless we define rules.
+* We can require explicit casts or “active field” tracking (not shown; simplest is “unsafe by convention”).
 
 ### Capability Rules
 
-None unless you create an `unsafe` capability later.
+None unless we create an `unsafe` capability later.
 
 ### Lowering
 
@@ -2056,7 +2056,7 @@ None unless you create an `unsafe` capability later.
 
 ### Diagnostics
 
-* **RANE_DIAG_TYPE_MISMATCH** — storing incompatible type into union slot (if you enforce)
+* **RANE_DIAG_TYPE_MISMATCH** — storing incompatible type into union slot (if we enforce)
 * **RANE_DIAG_SECURITY_VIOLATION** — union read requires unsafe mode (if enforced)
 
 ---
@@ -2090,14 +2090,14 @@ proc f a i64 b i64 -> i64:
 * Parameter types must exist.
 * Return statements must match return type.
 * If return type is `void`, `return` may omit expression.
-* Generic procs require type arguments or inference rules (you show explicit `<i64>`).
+* Generic procs require type arguments or inference rules (we show explicit `<i64>`).
 
 ### Capability Rules
 
 * A proc has an **effect set**:
 
   * declared by `requires cap1 cap2 ...`
-  * plus any inferred requirements (if you allow inference—your model prefers explicit, but CIAMs may assist).
+  * plus any inferred requirements (if we allow inference—our model prefers explicit, but CIAMs may assist).
 * Calls are legal only if caller’s effect set ⊇ callee’s effect set.
 
 ### Lowering
@@ -2175,7 +2175,7 @@ async proc f(...) -> T requires(...) {
 ### Typing Rules
 
 * `await e` requires `e` to be an awaitable type (e.g., `Task<T>` or compiler-known async result).
-* `async proc` returns `T` at surface, but internally becomes `Task<T>` or state machine handle (your surface hides it).
+* `async proc` returns `T` at surface, but internally becomes `Task<T>` or state machine handle (our surface hides it).
 
 ### Capability Rules
 
@@ -2260,7 +2260,7 @@ let r: i64 = join_i64(th);
 
 ### OSW Expectations
 
-* inline small worker bodies only if not truly spawned (if you allow “static threads” off)
+* inline small worker bodies only if not truly spawned (if we allow “static threads” off)
 * otherwise treat spawn/join as effectful barriers
 
 ### x64 Patterns
@@ -2279,9 +2279,9 @@ let r: i64 = join_i64(th);
 
 ---
 
-# 9) Statements (Complete Set in Your Syntax)
+# 9) Statements (Complete Set in Our Syntax)
 
-Below are **every statement keyword/construct you used**, each fully specified.
+Below are **every statement keyword/construct we used**, each fully specified.
 
 ---
 
@@ -2377,7 +2377,7 @@ None.
 ### Diagnostics
 
 * **RANE_DIAG_TYPE_MISMATCH** — target/expr type mismatch
-* **RANE_DIAG_SECURITY_VIOLATION** — trying to mutate immutable binding (if you enforce immutability)
+* **RANE_DIAG_SECURITY_VIOLATION** — trying to mutate immutable binding (if we enforce immutability)
 * **RANE_DIAG_PARSE_ERROR** — invalid target
 
 ---
@@ -2447,7 +2447,7 @@ if (<cond>) { ... } else { ... }
 
 ### Typing Rules
 
-* `<cond>` must be `bool` (or you must define explicit coercions; safest is bool-only).
+* `<cond>` must be `bool` (or we must define explicit coercions; safest is bool-only).
 
 ### Capability Rules
 
@@ -2558,7 +2558,7 @@ None.
 
 ### OSW Expectations
 
-* unrolling, strength reduction, vectorization hints (if you ever add).
+* unrolling, strength reduction, vectorization hints (if we ever add).
 
 ### x64 Patterns
 
@@ -2665,7 +2665,7 @@ throw <expr>;
 
 ### Typing Rules
 
-* thrown value type must match catch variable type (or be `any`/`int` if you define it).
+* thrown value type must match catch variable type (or be `any`/`int` if we define it).
 * if no catch, finally still runs.
 
 ### Capability Rules
@@ -2775,7 +2775,7 @@ asm { ... }
 
 ### Capability Rules
 
-* requires `syscalls` in your example; policy may require `unsafe_asm`.
+* requires `syscalls` in our example; policy may require `unsafe_asm`.
 
 ### Lowering
 
@@ -2913,11 +2913,11 @@ assert(<cond>, "<msg>");
 ### Typing Rules
 
 * numeric types; define integer vs float behavior.
-* division by zero: either runtime trap or undefined; your assert model suggests trap in safe mode.
+* division by zero: either runtime trap or undefined; our assert model suggests trap in safe mode.
 
 ### Lowering
 
-* integer div uses `idiv`; float uses `divss/divsd` etc (if you implement SSE path).
+* integer div uses `idiv`; float uses `divss/divsd` etc (if we implement SSE path).
 
 ### x64 Patterns (integer i64)
 
@@ -3041,8 +3041,8 @@ cast(<expr>, <Type>)
   * int widening/narrowing
   * float conversions
   * enum repr conversions
-  * pointer casts (if you add)
-* narrowing may require explicit `as` (you already do explicit).
+  * pointer casts (if we add)
+* narrowing may require explicit `as` (we already do explicit).
 
 ### x64 Patterns
 
@@ -3098,7 +3098,7 @@ Diagnostics:
 
 ## 11.2 `vector`, `map`, tuples `(1 "hi" true)`
 
-These are runtime-backed (require heap in your example).
+These are runtime-backed (require heap in our example).
 
 Capability:
 
@@ -3242,7 +3242,7 @@ Grammar:
 Typing:
 
 * returns declared type (e.g., `i64`) only if runtime guarantees; otherwise must return `any` and cast.
-* Your syntax assumes typed eval returning i64; that implies eval API is typed or validated.
+* Our syntax assumes typed eval returning i64; that implies eval API is typed or validated.
 
 Capability:
 
@@ -3408,7 +3408,7 @@ Diagnostics:
 
 # 25) Diagnostics Model (how errors are reported)
 
-You already have a `rane_diag_t` style system; the manual defines required codes:
+We already have a `rane_diag_t` style system; the manual defines required codes:
 
 * **RANE_DIAG_PARSE_ERROR**
 * **RANE_DIAG_UNDEFINED_NAME**
@@ -3484,7 +3484,7 @@ Each diagnostic must include:
 
 * **Surface token:** `addr` (as in `let p0 = addr 4096 4 8 16`)
 * **Typed CIL token:** `addr(...)`
-* **AST node kind:** `AddrExpr(base, a, b, c)` (your 4-arg shape)
+* **AST node kind:** `AddrExpr(base, a, b, c)` (our 4-arg shape)
 * **Typed CIL op kind:** `ADDR_CALC`
 * **Effects / capabilities:** none (pure address arithmetic) unless policy gates raw pointers
 * **OSW hooks:** constant-fold, CSE, fold into load/store addressing modes
@@ -3577,7 +3577,7 @@ Each diagnostic must include:
 * **Typed CIL token:** `asm { ... }`
 * **AST node kind:** `AsmStmt(lines, outputs?, clobbers?)`
 * **Typed CIL op kind:** `INLINE_ASM`
-* **Effects / capabilities:** requires `syscalls` in your usage (policy may require `unsafe_asm`)
+* **Effects / capabilities:** requires `syscalls` in our usage (policy may require `unsafe_asm`)
 * **OSW hooks:** barrier (no reordering across), must model clobbers
 * **x64 lowering snippet:** emitted verbatim (with operand substitution)
 * **Canonical errors:**
@@ -4051,7 +4051,7 @@ Each diagnostic must include:
 
 * **Surface token:** `goto`
 * **Typed CIL token:** `goto`
-* **AST node kind:** `GotoStmt(cond, tLabel, fLabel)` (your ternary goto form)
+* **AST node kind:** `GotoStmt(cond, tLabel, fLabel)` (our ternary goto form)
 * **Typed CIL op kind:** `BR_COND` or `JMP`
 * **Effects / capabilities:** none
 * **OSW hooks:** branch simplification, jump threading
@@ -4327,7 +4327,7 @@ Each diagnostic must include:
 * **Typed CIL token:** `nonlinear`
 * **AST node kind:** `ProcQualifier(Nonlinear)`
 * **Typed CIL op kind:** `CIL_PROC_NONLINEAR`
-* **Effects / capabilities:** relaxes linearity constraints (if your system treats this as opt-out)
+* **Effects / capabilities:** relaxes linearity constraints (if our system treats this as opt-out)
 * **OSW hooks:** fewer restrictions; still must be safe
 * **x64 lowering snippet:** none
 * **Canonical errors:** `RANE_DIAG_SECURITY_VIOLATION` if nonlinear prohibited in policy zones
@@ -4356,7 +4356,7 @@ Each diagnostic must include:
 * **Effects / capabilities:** none
 * **OSW hooks:** null-prop, branch pruning
 * **x64 lowering snippet:** `xor rax, rax`
-* **Canonical errors:** `RANE_DIAG_TYPE_MISMATCH` if assigned to non-nullable type (if you enforce)
+* **Canonical errors:** `RANE_DIAG_TYPE_MISMATCH` if assigned to non-nullable type (if we enforce)
 
 ---
 
@@ -4496,7 +4496,7 @@ Each diagnostic must include:
 * **Typed CIL token:** typically `print("...")` or `say("...")` intrinsic
 * **AST node kind:** `SayStmt(stringExpr)`
 * **Typed CIL op kind:** `CALL_RT_PRINT` (recommended)
-* **Effects / capabilities:** requires print capability (your imports imply `rane_rt_print`)
+* **Effects / capabilities:** requires print capability (our imports imply `rane_rt_print`)
 * **OSW hooks:** treat as IO barrier if actual output
 * **x64 lowering snippet:** runtime call
 * **Canonical errors:** `RANE_DIAG_SECURITY_VIOLATION` missing print capability (if modeled)
@@ -4753,7 +4753,7 @@ Each diagnostic must include:
 ## Appendix B — Operator Precedence Table
 
 > Highest precedence at top.
-> All operators listed are exactly those present in your syntax examples and keyword list.
+> All operators listed are exactly those present in our syntax examples and keyword list.
 
 | Precedence | Operators / Forms                               | Associativity | Notes                               |      |               |
 | ---------: | ----------------------------------------------- | ------------- | ----------------------------------- | ---- | ------------- |
@@ -4777,7 +4777,7 @@ Each diagnostic must include:
 
 ## Appendix C — Typed CIL Opcode Catalog (Current Feature Set)
 
-> This is a **catalog of canonical Typed CIL ops** that cover everything you demonstrated.
+> This is a **catalog of canonical Typed CIL ops** that cover everything we demonstrated.
 > Each op includes: **Signature**, **Type rules**, **Effects**, and **Lowering target**.
 
 ### C.1 Module / Decls
@@ -4817,7 +4817,7 @@ Each diagnostic must include:
 * **`LOCAL(name, type)`** (alloc local)
 * **`LOAD(type, addr)`**
 * **`STORE(type, addr, value)`**
-* **`ADDR_CALC(base, a, b, c)`** (your addr form; may generalize)
+* **`ADDR_CALC(base, a, b, c)`** (our addr form; may generalize)
 
 ### C.4 Arithmetic / Logical
 
@@ -4876,7 +4876,7 @@ Each diagnostic must include:
 
 ## Appendix D — x64 Emission Templates (Windows x86-64, bytes-level forms)
 
-> These are **bytes-level templates** for the core patterns you requested previously (Rel32 calls, Abs64 immediates, prologue/epilogue, branches, jump tables).
+> These are **bytes-level templates** for the core patterns we requested previously (Rel32 calls, Abs64 immediates, prologue/epilogue, branches, jump tables).
 > Bytes shown in hex with placeholders in brackets.
 
 ### D.1 Windows x64 Prologue / Epilogue (minimal)
@@ -5077,7 +5077,7 @@ Table is 8-byte absolute addresses or RIP-relative thunks (preferred: RIP-relati
 | `nonlinear`          | `ProcQualifier`   | `kind = Nonlinear`                                         | Opt-out tag (policy-defined).                 |                 |
 | `requires`           | `RequiresCaps`    | `caps: [Ident]`                                            | Attaches to proc signature.                   |                 |
 | `capability`         | `CapabilityDecl`  | `name: Ident`                                              | Declares capability symbol.                   |                 |
-| `type`               | `TypeDecl`        | `name: Ident`                                              | Builtin registration/opaque (per your rules). |                 |
+| `type`               | `TypeDecl`        | `name: Ident`                                              | Builtin registration/opaque (per our rules). |                 |
 | `alias`              | `AliasDecl`       | `name: Ident, target: TypeRef`                             | Pure synonym.                                 |                 |
 | `typealias`          | `TypeAliasDecl`   | `name: Ident, target: TypeRef`                             | Nominal identity (representation same).       |                 |
 | `struct`             | `StructDecl`      | `name: Ident, fields: [FieldDecl]`                         | Field: `name TypeRef`.                        |                 |
@@ -5116,7 +5116,7 @@ Table is 8-byte absolute addresses or RIP-relative thunks (preferred: RIP-relati
 | `default` | `DefaultArm`                                        | `block`                                                                   |                                                           |
 | `switch`  | `SwitchStmt`                                        | `scrutinee, cases: [ConstCase], default`                                  | Integer/enum oriented.                                    |
 | `decide`  | `DecideStmt`                                        | `scrutinee, cases, default`                                               | Alias of switch-like with different style.                |
-| `goto`    | `GotoStmt`                                          | `cond?: Expr, trueLabel: Ident, falseLabel?: Ident`                       | Your form `goto c ? A : B`.                               |
+| `goto`    | `GotoStmt`                                          | `cond?: Expr, trueLabel: Ident, falseLabel?: Ident`                       | Our form `goto c ? A : B`.                               |
 | `label`   | `LabelStmt`                                         | `name: Ident`                                                             |                                                           |
 | `node`    | `NodeDecl`                                          | `name: Ident, body: Block`                                                | CFG block grouping.                                       |
 | `start`   | `StartAtNode`                                       | `nodeName: Ident`                                                         | Entry binding.                                            |
@@ -5136,7 +5136,7 @@ Table is 8-byte absolute addresses or RIP-relative thunks (preferred: RIP-relati
 | `join`    | `JoinExpr`                                          | `handle: Expr`                                                            | Returns typed join result.                                |
 | `send`    | `SendStmt`                                          | `ch: Expr, val: Expr`                                                     |                                                           |
 | `recv`    | `RecvExpr`                                          | `ch: Expr`                                                                |                                                           |
-| `asm`     | `AsmStmt`                                           | `lines: [String]`                                                         | Optional constraints/clobbers if you add.                 |
+| `asm`     | `AsmStmt`                                           | `lines: [String]`                                                         | Optional constraints/clobbers if we add.                 |
 | `mmio`    | `MmioRegionDecl` / `MmioReadExpr` / `MmioWriteStmt` | region decl fields or read/write args                                     | `read32/write32` are separate KWs below.                  |
 | `region`  | (part of) `MmioRegionDecl`                          | `name`                                                                    | token inside mmio decl                                    |
 | `from`    | (part of) `MmioRegionDecl`                          | `base`                                                                    |                                                           |
@@ -5148,9 +5148,9 @@ Table is 8-byte absolute addresses or RIP-relative thunks (preferred: RIP-relati
 
 | Token            | AST Kind       | Fields                    | Notes                                           |
 | ---------------- | -------------- | ------------------------- | ----------------------------------------------- |
-| `addr`           | `AddrExpr`     | `(base,a,b,c)`            | your 4-arg addr form                            |
+| `addr`           | `AddrExpr`     | `(base,a,b,c)`            | our 4-arg addr form                            |
 | `load`           | `LoadExpr`     | `(type, addrExpr)`        |                                                 |
-| `store`          | `StoreExpr`    | `(type, addrExpr, value)` | statement-like, but expression ok if you allow  |
+| `store`          | `StoreExpr`    | `(type, addrExpr, value)` | statement-like, but expression ok if we allow  |
 | `borrow`         | `BorrowExpr`   | `(expr)`                  |                                                 |
 | `choose`         | `ChooseExpr`   | `(mode, a, b)`            | mode inferred from token sequence (e.g., `max`) |
 | `eval`           | `EvalExpr`     | `(stringExpr)`            | dynamic eval                                    |
@@ -5192,7 +5192,7 @@ Operators:
 * `imm32/imm64` little-endian.
 * `disp32` little-endian.
 * `slot(x)` means compiler-assigned stack slot displacement for local `x` relative to `rsp` after prologue.
-* For brevity, templates show the **primary encoding** you’ll use most often.
+* For brevity, templates show the **primary encoding** we’ll use most often.
 
 ### D2.1 Control Flow / CFG
 
@@ -5208,7 +5208,7 @@ Operators:
 
 ### D2.2 Prologue / Epilogue (emitter-owned, not an opcode but required)
 
-You’ll apply this around every proc:
+We’ll apply this around every proc:
 
 * **PROLOGUE(frame):** `48 81 EC [imm32 FRAME]` (or small imm8 form `48 83 EC xx`) + saves
 * **EPILOGUE(frame):** restores + `48 81 C4 [imm32 FRAME]` + `C3`
@@ -5241,7 +5241,7 @@ You’ll apply this around every proc:
 
 ### D2.5 Integer Arithmetic / Bitwise / Shifts
 
-> These assume operands are already in regs (your reg allocator decides which).
+> These assume operands are already in regs (our reg allocator decides which).
 
 | Typed CIL Op              | Purpose          | Exact emission template(s)                                                   |
 | ------------------------- | ---------------- | ---------------------------------------------------------------------------- |
@@ -5325,13 +5325,13 @@ These are CFG patterns, not single instructions.
 
 ## “Backend mechanically specifiable” closing constraints (the strict rules)
 
-To make this truly mechanical, your emitter must also obey these **invariants**:
+To make this truly mechanical, the emitter must also obey these **invariants**:
 
 1. **Value placement contract** per opcode (e.g., `ADD_I64` requires inputs in specific regs).
 
-   * If you want it deterministic, define a fixed operand register convention per opcode (RAX/RBX/RCX patterns) *or* define a small register allocator that maps virtual regs to physical regs and spills to stack.
+   * If we want it deterministic, define a fixed operand register convention per opcode (RAX/RBX/RCX patterns) *or* define a small register allocator that maps virtual regs to physical regs and spills to stack.
 
-2. **Frame layout contract** (you already asked for a frame planner earlier):
+2. **Frame lawet contract** (we already asked for a frame planner earlier):
 
    * every local has a slot and known size/alignment
    * stack frame size includes: locals + spills + temps + **32 shadow** + alignment padding
@@ -5380,7 +5380,7 @@ To make emission deterministic, **Typed CIL lowering must place operands exactly
   * 64-bit store uses **RDX** as value register (so address can remain in RAX)
   * 32-bit store uses **EDX**
 
-> If your register allocator wants different regs, it must insert `MOV` shims to conform to this contract **before** each opcode.
+> If the register allocator wants different regs, it must insert `MOV` shims to conform to this contract **before** each opcode.
 
 ### 0.3 Canonical memory operand form for locals
 
@@ -5397,13 +5397,13 @@ Canonical encodings:
 
 ### 0.4 Relocation record kinds (exact)
 
-Your ExecMeta/patcher should support these relocation kinds:
+ther ExecMeta/patcher should support these relocation kinds:
 
 * `REL32_CALL`: patch a 4-byte rel32 operand of `E8`
 * `REL32_JMP`: patch a 4-byte rel32 operand of `E9`
 * `REL32_JCC`: patch a 4-byte rel32 operand of `0F 8?`
 * `RIPREL32_LOAD`: patch a 4-byte disp32 of `mov rax, [rip+disp32]` (IAT pointer loads)
-* `ABS64_IMM`: patch an 8-byte immediate (e.g., `mov rax, imm64`) when you materialize absolute addresses
+* `ABS64_IMM`: patch an 8-byte immediate (e.g., `mov rax, imm64`) when we materialize absolute addresses
 
 Each record:
 
@@ -5821,7 +5821,7 @@ Each record:
 * Bytes: `48 39 D8` *(cmp rax, rbx)*
 * Relocs: —
 
-> **SETcc contract:** must immediately follow a flag-producing compare/test unless you intentionally preserve flags.
+> **SETcc contract:** must immediately follow a flag-producing compare/test unless we intentionally preserve flags.
 
 ### `SET_LT -> AL`
 
@@ -5987,7 +5987,7 @@ Each record:
 
   * `REL32_JCC(target=L_ok)`
 
-*(If you prefer “assert calls a runtime reporter then traps”, swap ud2 with CALL_IAT of reporter; record reloc accordingly.)*
+*(If we prefer “assert calls a runtime reporter then traps”, swap ud2 with CALL_IAT of reporter; record reloc accordingly.)*
 
 ---
 
@@ -6079,11 +6079,11 @@ These do **not** have direct bytes; they must be lowered by CIAM/Resolver into C
 
 * `IF / ELSE` → `CMP/SET/BR_COND/JMP/LABEL`
 * `WHILE / FOR` → labels + cond branches + backedges
-* `MATCH / SWITCH / DECIDE` → compare chain or jump table (when you add jump tables, that becomes a new opcode contract)
+* `MATCH / SWITCH / DECIDE` → compare chain or jump table (when we add jump tables, that becomes a new opcode contract)
 * `TRY / CATCH / FINALLY` → region lowering into labels + calls + cleanup edges
 * `WITH / DEFER / LOCK` → `TRY/FINALLY` lowering + call ops
-* `ASYNC / AWAIT` → state machine lowering (will introduce new opcodes once you formalize them)
-* `ASM` → either “opaque bytes block” or parsed mini-ops; not part of Typed CIL opcode contract unless you define it as such
+* `ASYNC / AWAIT` → state machine lowering (will introduce new opcodes once we formalize them)
+* `ASM` → either “opaque bytes block” or parsed mini-ops; not part of Typed CIL opcode contract unless we define it as such
 
 ---
 
@@ -6108,4 +6108,1090 @@ Whenever an opcode contains a placeholder, emit the relocation:
 * `SETcc` clobbers `AL` (and reads flags)
 
 ---
+
+* **required input locations** (reg/stack) 
+* **produced output location** 
+* **clobbered regs** 
+* **required flags** (if any) 
+* **emitted bytes sequence(s)** (bytes-level, with placeholders) 
+* **relocation records generated** (if any) 
+We’ll also include the **canonical lowering contracts** (CIAM mapping) where the opcode exists specifically to complete the surface syntax. 
+--- 
+# RANE Emitter Contract Sheet v2 (Windows x86-64 PE) 
+## 0) Global backend invariants (apply to all opcodes) 
+### 0.1 Windows x64 ABI invariants 
+* **Integer/pointer args 0..3** in: `RCX, RDX, R8, R9` 
+* **Return integer/pointer** in: `RAX` 
+* **Caller allocates 32 bytes shadow space** before `call` (always). 
+* **RSP must be 16-byte aligned at the `call` instruction**. 
+* **Volatile (caller-saved):** `RAX, RCX, RDX, R8, R9, R10, R11` 
+* **Non-volatile (callee-saved):** `RBX, RBP, RSI, RDI, R12–R15` 
+### 0.2 Location model 
+Every SSA-ish “value” in Typed CIL is materialized as one of: 
+* `Reg64(rX)` (one of the general regs) 
+* `Reg32(rX)` (low 32-bit reg view) 
+* `Stack64([rsp+disp])` 
+* `Stack32([rsp+disp])` 
+* `Imm32/Imm64` 
+* `AddrRipRel([rip+disp32])` (for globals, imports, rodata) 
+### 0.3 Frame planner contract (inputs to emitter) 
+Emitter receives per-proc: 
+* `FRAME_SIZE` (includes locals/temps/spills) 
+* `SHADOW_SIZE = 32` 
+* `ALIGN_PAD` so that `rsp` is 16-aligned at calls 
+* `stack_slot(value_id) -> disp32` 
+### 0.4 Relocation record types (canonical) 
+* `Rel32_Call` — patch a `call rel32` immediate (4 bytes) 
+* `Rel32_Jmp` — patch `jmp rel32` or `jcc rel32` immediate 
+* `Rel32_RipDisp` — patch a RIP-relative disp32 for `[rip+disp32]` 
+* `Abs64_Imm` — patch an imm64 (8 bytes), used rarely (absolute pointers) 
+--- 
+# 1) New Typed CIL opcodes needed to fully cover the syntax 
+Below are the **missing families** that make the sample fully specifiable. 
+--- 
+## 1.1 Boolean materialization and branch 
+### OPCODE: `BOOL_FROM_FLAGS(cc)` 
+Used after `CMP_*` to produce a `bool` value in `AL`. 
+* **Required inputs:** flags set by a prior `CMP/TEST` (same basic block, no clobber in-between) 
+* **Output:** `Reg8(AL)` (canonical bool 0/1) 
+* **Clobbers:** `RAX` (low byte written), flags preserved 
+* **Flags required:** yes (from immediately preceding compare/test) 
+* **Emission:** 
+* `SETcc AL` 
+Bytes vary by cc: 
+* `sete al` = `0F 94 C0` 
+* `setne al` = `0F 95 C0` 
+* `setl al` (signed <) = `0F 9C C0` 
+* `setb al` (unsigned <) = `0F 92 C0` 
+* etc. 
+* `MOVZX EAX, AL` (if we normalize to i32/i64 later) 
+* `0F B6 C0` 
+* **Relocs:** none 
+* **Canonical errors:** 
+* `RANE_DIAG_INTERNAL_ERROR`: “BOOL_FROM_FLAGS without prior flags producer” 
+### OPCODE: `BR_BOOL(label_true, label_false)` 
+Branches based on `AL` (or any canonical bool value). 
+* **Required inputs:** `Reg8(AL)` contains 0/1 
+* **Output:** control flow only 
+* **Clobbers:** flags 
+* **Flags required:** no 
+* **Emission:** 
+* `TEST AL, AL` → `84 C0` 
+* `JNE rel32` to true → `0F 85 xx xx xx xx` (Rel32_Jmp) 
+* `JMP rel32` to false → `E9 xx xx xx xx` (Rel32_Jmp) 
+* **Relocs:** `Rel32_Jmp` for both branches 
+**Surface lowering:** 
+`goto (expr) -> Lt Lf` ⇒ `emit(expr) -> bool in AL` ⇒ `BR_BOOL Lt Lf` 
+--- 
+# 1.2 Call argument placement (this is the big missing piece) 
+We introduce explicit arg-move opcodes so the backend is deterministic. 
+### OPCODE: `ARG_CLEAR(argc)` 
+Reserves argument staging area for stack args (beyond 4) and guarantees shadow+alignment are in effect. 
+* **Required inputs:** current `RSP` points to frame base (after prologue) 
+* **Output:** stack space reserved for call args 
+* **Clobbers:** `RSP` 
+* **Flags:** none 
+* **Emission:** (if stack args exist) 
+* `SUB RSP, call_arg_area_size` 
+`48 81 EC imm32` 
+* **Relocs:** none 
+*(If no stack args, ARG_CLEAR can be a no-op; shadow space is already counted in frame planner.)* 
+### OPCODE: `ARG_I64(index, src)` 
+Places argument `index` (0-based) into ABI location. 
+* **Required inputs:** `src` in Reg64/Stack64/Imm 
+* **Output:** arg in one of RCX/RDX/R8/R9 or `[rsp+shadow+arg_off]` 
+* **Clobbers:** `RAX` (as scratch if needed) 
+* **Flags:** none 
+* **Emission patterns:** 
+* If `index==0`: move to RCX 
+* `MOV RCX, r64` = `48 89 C1` (from RAX example; actual ModRM depends) 
+* `MOV RCX, [rsp+disp]` = `48 8B 8C 24 disp32` 
+* `MOV RCX, imm64` = `48 B9 imm64` (**Abs64_Imm** patch) 
+* If `index==1`: to RDX (`48 89 D1` etc) 
+* If `index==2`: to R8 (`49 89 C0` style) 
+* If `index==3`: to R9 (`49 89 C1` style) 
+* If `index>=4`: store to `[rsp+shadow+8*(index-4)]` 
+* `MOV [rsp+disp32], r64` = `48 89 84 24 disp32` 
+* `MOV [rsp+disp32], imm32` = `48 C7 84 24 disp32 imm32` (sign-extended imm32) 
+* **Relocs:** only if using imm64 (rare; prefer rip-relative constants for pointers) 
+* **Canonical errors:** 
+* `RANE_DIAG_TYPE_MISMATCH`: arg width mismatch (e.g., trying to pass struct by value without ABI rule) 
+* `RANE_DIAG_INTERNAL_ERROR`: index out of bounds for computed argc 
+### OPCODE: `CALL_DIRECT(sym, argc)` 
+Direct call to known internal proc. 
+* **Required inputs:** args already placed by `ARG_*` 
+* **Output:** return in `RAX` (if non-void) 
+* **Clobbers:** volatile regs per ABI (assume RCX/RDX/R8/R9/R10/R11/RAX) 
+* **Flags:** none 
+* **Emission:** 
+* `CALL rel32` = `E8 xx xx xx xx` 
+→ **Rel32_Call** relocation to `sym` 
+* **Relocs:** `Rel32_Call` 
+### OPCODE: `CALL_IMPORT(imp_sym, argc)` 
+Call imported function via IAT thunk pointer. 
+* **Required inputs:** args already placed 
+* **Output:** `RAX` 
+* **Clobbers:** volatile regs, plus `RAX` used for the indirect call 
+* **Flags:** none 
+* **Emission canonical (CFG/DEP friendly):** 
+1. `MOV RAX, [RIP+disp32]` = `48 8B 05 dd dd dd dd` → **Rel32_RipDisp** to IAT slot 
+2. `CALL RAX` = `FF D0` 
+* **Relocs:** `Rel32_RipDisp` 
+### OPCODE: `CALL_END()` 
+Restores stack if `ARG_CLEAR` subtracted extra for stack args. 
+* **Required inputs:** call_arg_area_size known 
+* **Output:** stack restored 
+* **Clobbers:** `RSP` 
+* **Flags:** none 
+* **Emission:** `ADD RSP, imm32` = `48 81 C4 imm32` (if used) 
+--- 
+# 1.3 Integer width conversion (needed for u32/u16/i32 fields) 
+### OPCODE: `ZEXT_U32_TO_U64(src32)` 
+* **Input:** `Reg32(rX)` or `Stack32([rsp+disp])` 
+* **Output:** `Reg64(rX)` (canonical: same reg, upper cleared) 
+* **Clobbers:** none (if reg form), else `RAX` scratch 
+* **Flags:** none 
+* **Emission:** 
+* If src is `Reg32`: **no-op** (writing to a 32-bit reg zero-extends automatically) 
+* If src is stack: `MOV EAX, [rsp+disp32]` = `8B 84 24 disp32` then treat `RAX` as zero-extended 
+* **Relocs:** none 
+### OPCODE: `SEXT_I32_TO_I64(src32)` 
+* **Input:** `Reg32` or `Stack32` 
+* **Output:** `Reg64` (canonical `RAX` if stack) 
+* **Clobbers:** `RAX` (if needed) 
+* **Flags:** none 
+* **Emission:** 
+* Reg form: `MOVSXD r64, r/m32` = `48 63 /r` 
+* e.g. `movsxd rax, ecx` bytes depend on ModRM 
+* Stack form: `MOVSXD RAX, [rsp+disp32]` = `48 63 84 24 disp32` 
+* **Relocs:** none 
+### OPCODE: `TRUNC_I64_TO_I32(src64)` 
+* **Input:** `Reg64` or `Stack64` 
+* **Output:** `Reg32` (low 32 bits) 
+* **Clobbers:** `RAX` if stack 
+* **Emission:** 
+* Reg form: **view** as 32-bit reg (no instruction) 
+* Stack form: `MOV EAX, [rsp+disp32]` loads low 32 bits 
+--- 
+# 1.4 Field addressing and aggregate lawet (struct/union/variant) 
+We standardize lawet rules so offsets are deterministic. 
+## 1.4.1 Lawet rules (must be fixed to emit correct bytes) 
+* Struct lawet: C-like 
+* fields in order 
+* each field aligned to its natural alignment (or overridden) 
+* struct alignment = max(field align) 
+* struct size padded to struct alignment 
+* Union lawet: 
+* all fields at offset 0 
+* size = max(field size), align = max(field align) 
+* Enum: 
+* stored as underlying repr type 
+* Variant (tagged union): 
+* canonical lawet: 
+* `tag: repr` at offset 0 
+* `payload: union` at offset `align_up(sizeof(tag), payload_align)` 
+* size padded to overall align 
+We need this because we do: 
+* `h.magic`, `h.version`, `h.size` 
+* `u.i`, `u.f` 
+* `Maybe<T>` pattern match 
+## 1.4.2 Field opcodes 
+### OPCODE: `ADDR_LOCAL(slot_disp32)` 
+Compute address of a local/stack object. 
+* **Input:** none 
+* **Output:** `Reg64(RAX)` = `rsp + disp32` 
+* **Clobbers:** `RAX` 
+* **Flags:** none 
+* **Emission:** `LEA RAX, [RSP+disp32]` = `48 8D 84 24 disp32` 
+* **Relocs:** none 
+### OPCODE: `ADDR_FIELD(base_addr_reg, field_off32)` 
+* **Input:** `Reg64(base)` points to struct 
+* **Output:** `Reg64(RAX)` points to field 
+* **Clobbers:** `RAX` 
+* **Flags:** none 
+* **Emission:** `LEA RAX, [base + off32]` 
+* If base is RAX already: `48 8D 80 off32` 
+* General: `48 8D 80/81 …` (ModRM depends) 
+* **Relocs:** none 
+### OPCODE: `LOAD_FIELD_I64(base_addr_reg, off32)` 
+* **Input:** `Reg64(base)` 
+* **Output:** `Reg64(RAX)` (or chosen dest reg) 
+* **Clobbers:** dest 
+* **Flags:** none 
+* **Emission:** `MOV RAX, [base+off32]` 
+* example base=RAX: `48 8B 80 off32` 
+* **Relocs:** none 
+### OPCODE: `STORE_FIELD_I64(base_addr_reg, off32, src)` 
+* **Input:** base reg + src reg/imm 
+* **Output:** memory updated 
+* **Clobbers:** `RAX` if src is imm64 handling required 
+* **Emission:** 
+* `MOV [base+off32], r64` = `48 89 80 off32` 
+* `MOV QWORD PTR [base+off32], imm32` = `48 C7 80 off32 imm32` 
+* **Relocs:** none 
+*(Same family exists for I32/U32/U16/U8/F32/F64; each has specific MOV forms.)* 
+--- 
+# 1.5 Array indexing and address calculation 
+### OPCODE: `ADDR_INDEX(base_addr_reg, idx_reg, elem_size_pow2, base_off32)` 
+Computes `base + base_off + idx * elem_size`. 
+* **Input:** base reg, idx reg (i64) 
+* **Output:** `RAX` address 
+* **Clobbers:** `RAX` 
+* **Flags:** none 
+* **Emission (scale must be 1,2,4,8):** 
+* `LEA RAX, [base + idx*scale + off32]` 
+* For scale=8 common: `48 8D 84 C1 off32` style (ModRM/SIB depend) 
+* **Relocs:** none 
+* **Canonical errors:** 
+* `RANE_DIAG_TYPE_MISMATCH`: elem_size not supported by LEA scale (must be 1/2/4/8); else fallback requires IMUL sequence opcode. 
+### OPCODE: `LOAD_AT_I64(addr_reg)` 
+* **Input:** `Reg64(addr)` 
+* **Output:** `RAX` 
+* **Clobbers:** `RAX` 
+* **Emission:** `MOV RAX, [addr]` = `48 8B 00` 
+### OPCODE: `STORE_AT_I64(addr_reg, src)` 
+* **Input:** addr + src 
+* **Output:** memory updated 
+* **Emission:** `MOV [addr], r64` = `48 89 00` 
+--- 
+# 1.6 MMIO region addressing (the surface form needs this) 
+### OPCODE: `MMIO_ADDR(region_base_imm32, offset_imm32)` 
+Computes absolute address for MMIO access. 
+* **Input:** none 
+* **Output:** `RAX = region_base + offset` 
+* **Clobbers:** `RAX` 
+* **Flags:** none 
+* **Emission:** 
+* `MOV EAX, imm32` = `B8 imm32` (zero-extends into RAX) 
+* `ADD EAX, imm32` = `05 imm32` (still zero-extended in RAX) 
+* **Relocs:** none 
+### OPCODE: `MMIO_READ32(addr_reg)` 
+* **Input:** `RAX` holds address 
+* **Output:** `EAX` contains loaded u32 
+* **Clobbers:** `RAX` 
+* **Flags:** none 
+* **Emission:** `MOV EAX, DWORD PTR [RAX]` = `8B 00` 
+* **Note:** mark as **volatile** in optimizer (OSW must not delete/reorder across barriers) 
+* **Relocs:** none 
+### OPCODE: `MMIO_WRITE32(addr_reg, src32)` 
+* **Input:** `RAX` addr, `src` in reg/imm 
+* **Output:** memory written 
+* **Clobbers:** flags 
+* **Emission:** 
+* reg: `MOV [RAX], r32` = `89 00` 
+* imm32: `C7 00 imm32` 
+* **Relocs:** none 
+**Surface lowering:** 
+`read32 REG 0 into x` ⇒ `MMIO_ADDR(4096,0)` ⇒ `MMIO_READ32` ⇒ store to local `x` 
+--- 
+# 1.7 `spawn/join/send/recv/lock` as deterministic runtime calls 
+To keep the backend mechanically specifiable, we define them as **CIAM-lowered** to imports with fixed names. 
+## Canonical runtime imports (example ABI) 
+* `rane_rt_threads.spawn_proc_i64(proc_ptr, arg0_i64) -> thread_handle` 
+* `rane_rt_threads.join_i64(thread_handle) -> i64` 
+* `rane_rt_channels.send_i64(chan_handle, val_i64) -> void` 
+* `rane_rt_channels.recv_i64(chan_handle) -> i64` 
+* `rane_rt_threads.mutex_lock(mutex_handle) -> void` 
+* `rane_rt_threads.mutex_unlock(mutex_handle) -> void` 
+### OPCODE: `SPAWN_I64(proc_sym, arg0)` 
+Lowered to: ARG + CALL_IMPORT `spawn_proc_i64` 
+* **Required inputs:** `proc_sym` addressable (either function pointer constant or symbol) 
+* **Output:** `RAX` thread_handle 
+* **Clobbers:** volatile regs 
+* **Emission:** sequence of `ARG_*` + `CALL_IMPORT` 
+* **Relocs:** rip-disp to IAT slot + maybe a symbol address relocation if proc passed by pointer 
+### OPCODE: `JOIN_I64(handle)` 
+Lowered to: ARG + CALL_IMPORT `join_i64` 
+### OPCODE: `CHAN_SEND_I64(ch, val)` 
+Lowered to: ARG + CALL_IMPORT `send_i64` 
+### OPCODE: `CHAN_RECV_I64(ch)` 
+Lowered to: ARG + CALL_IMPORT `recv_i64` 
+### OPCODE: `LOCK_BEGIN(mutex)` / `LOCK_END(mutex)` 
+Lowered to: 
+* lock: `CALL_IMPORT mutex_lock` 
+* unlock in guaranteed cleanup path: `CALL_IMPORT mutex_unlock` 
+--- 
+# 1.8 `with`, `defer`, `try/catch/finally`, `throw` (mechanical lowering) 
+To keep this emitter contract purely codegen-focused, we adopt a **deterministic, compile-time rewritable model**: 
+### Model A (simplest, matches “compile-time centric”): no stack unwinding, only explicit control flow 
+* `try/catch/finally` is lowered into explicit CFG with **error codes**, not OS exceptions. 
+* `throw X` becomes `SET_ERR(X); JMP catch_label` 
+* `finally` runs on both normal exit and error exit. 
+This requires a canonical hidden local: 
+* `__err: i32` initialized to 0 
+* `__has_err: bool` or `__err != 0` 
+#### New opcodes 
+### OPCODE: `SET_ERR_I32(src)` 
+* **Input:** src i32 in reg/imm 
+* **Output:** store into `Stack32([rsp+err_slot])` 
+* **Clobbers:** none 
+* **Emission:** `MOV [rsp+disp32], imm32` or `MOV [rsp+disp32], r32` 
+### OPCODE: `GET_ERR_I32()` 
+* **Input:** none 
+* **Output:** `EAX` 
+* **Emission:** `MOV EAX, [rsp+err_disp32]` 
+### OPCODE: `CLEAR_ERR()` 
+* **Emission:** store 0 
+**Lowering template:** 
+Surface: 
+```rane 
+try: 
+S_try 
+catch e: 
+S_catch 
+finally: 
+S_fin 
+end 
+``` 
+Lowered CFG (labels): 
+* init: `CLEAR_ERR` 
+* `L_try`: S_try 
+* on normal: `JMP L_fin_norm` 
+* `L_throw`: `SET_ERR`; `JMP L_catch` 
+* `L_catch`: load err into temp `e`; S_catch; `JMP L_fin_err` 
+* `L_fin_norm`: S_fin; `JMP L_end` 
+* `L_fin_err`: S_fin; `JMP L_end` 
+* `L_end`: continue 
+This makes codegen fully mechanical using only: 
+* stores/loads/branches/jumps 
+--- 
+# 1.9 `asm:` with local name binding 
+We used: 
+```rane 
+asm: 
+mov rax 1 
+add rax 2 
+mov out rax 
+end 
+``` 
+To keep it specifiable, define this rule: 
+* Inside `asm:` block, `mov <local_name> <reg>` is **not raw assembly**; it is a **RANE asm directive** lowered to `STORE_LOCAL_*` opcodes. 
+* Conversely, `mov <reg> <imm>` etc remains raw text passed to assembler. 
+#### Opcode for directive: 
+### OPCODE: `ASM_STORE_LOCAL_I64(slot_disp32, src_reg)` 
+* **Input:** src reg (e.g., RAX) 
+* **Output:** stack slot written 
+* **Emission:** `MOV [RSP+disp32], RAX` = `48 89 84 24 disp32` 
+--- 
+# 1.10 `#symbol` (compile-time symbol IDs) 
+Define `#NAME` as a **u32 symbol ID** generated by the resolver. 
+### OPCODE: `SYM_ID(name)` 
+* **Input:** none 
+* **Output:** `EAX = sym_id_u32` 
+* **Clobbers:** `EAX` 
+* **Emission:** `MOV EAX, imm32` = `B8 imm32` 
+* **Relocs:** none (ID is compile-time constant) 
+* **Errors:** undefined symbol token → `RANE_DIAG_UNDEFINED_NAME` 
+--- 
+# 2) The `=` ambiguity — mandatory rule so the backend is consistent 
+We must choose one of these; otherwise emission can’t be fully deterministic. 
+## Rule (recommended): `=` is **statement-only assignment**, never an expression 
+* Equality is only `==` 
+* Therefore: `let c6 = a = b` is a **compile-time parse/type error** 
+**Diagnostic:** 
+* `RANE_DIAG_PARSE_ERROR` or `RANE_DIAG_TYPE_MISMATCH` 
+* Message: “assignment `=` is not an expression; did we mean `==`?” 
+This single choice makes the entire contract sheet sane. 
+--- 
+# 3) “Typed CIL opcode → exact emission template(s)” table (core + v2 additions) 
+Below is a compact “one row per opcode” mapping for the new v2 opcodes (the ones the syntax needed). 
+(The original v1 core ops still apply; these are the extensions.) 
+### Table: v2 Opcode → Emission Templates 
+| Opcode | Template (bytes-level) | Relocs | 
+| --------------------------------- | ------------------------------------- | -------------------- | 
+| `BOOL_FROM_FLAGS(cc)` | `0F 9? C0` (+ optional `0F B6 C0`) | none | 
+| `BR_BOOL(T,F)` | `84 C0` ; `0F 85 rel32` ; `E9 rel32` | `Rel32_Jmp` | 
+| `ARG_CLEAR(n)` | `48 81 EC imm32` | none | 
+| `ARG_I64(0,src)` | move src→RCX | maybe Abs64 if imm64 | 
+| `ARG_I64(1,src)` | move src→RDX | maybe Abs64 | 
+| `ARG_I64(2,src)` | move src→R8 | maybe Abs64 | 
+| `ARG_I64(3,src)` | move src→R9 | maybe Abs64 | 
+| `ARG_I64(k>=4,src)` | `48 89 84 24 disp32` (or imm32 store) | none | 
+| `CALL_DIRECT(sym)` | `E8 rel32` | `Rel32_Call` | 
+| `CALL_IMPORT(iat)` | `48 8B 05 disp32` ; `FF D0` | `Rel32_RipDisp` | 
+| `CALL_END()` | `48 81 C4 imm32` | none | 
+| `ZEXT_U32_TO_U64(r32)` | no-op | none | 
+| `SEXT_I32_TO_I64(r/m32)` | `48 63 /r` | none | 
+| `ADDR_LOCAL(disp32)` | `48 8D 84 24 disp32` | none | 
+| `ADDR_FIELD(base,off32)` | `48 8D 80 off32` (base=RAX) | none | 
+| `LOAD_FIELD_I64(base,off32)` | `48 8B 80 off32` | none | 
+| `STORE_FIELD_I64(base,off32,src)` | `48 89 80 off32` | none | 
+| `ADDR_INDEX(base,idx,scale,off)` | `48 8D 84 ?? off32` | none | 
+| `LOAD_AT_I64(addr)` | `48 8B 00` | none | 
+| `STORE_AT_I64(addr,src)` | `48 89 00` | none | 
+| `MMIO_ADDR(base,off)` | `B8 imm32` ; `05 imm32` | none | 
+| `MMIO_READ32()` | `8B 00` | none | 
+| `MMIO_WRITE32(src)` | `89 00` or `C7 00 imm32` | none | 
+| `SET_ERR_I32` | `C7 84 24 disp32 imm32` | none | 
+| `GET_ERR_I32` | `8B 84 24 disp32` | none | 
+| `CLEAR_ERR` | store 0 | none | 
+| `SYM_ID(name)` | `B8 imm32` | none | 
+| `ASM_STORE_LOCAL_I64(disp, reg)` | `48 89 84 24 disp32` | none | 
+--- 
+# 4) What this v2 sheet now covers from the exact syntax 
+With the above additions, the sample becomes mechanically specifiable for: 
+✅ **Calls with any arg count** (`add5`, runtime functions, etc.) 
+✅ **u32/u16/i32 field loads/stores** (via field ops + ext rules) 
+✅ **struct field updates** (`set h.version to 2`, `add h.size by 512` → load/add/store field) 
+✅ **arrays indexing** (`arr[0]`) 
+✅ **mmio region operations** (`read32 REG 0 into x`) 
+✅ **spawn/join/send/recv/lock** (as deterministic CIAM lowering to imports) 
+✅ **try/catch/finally/throw** (via deterministic error-code CFG lowering) 
+✅ **goto (cond) -> L1 L2** (bool materialize + BR_BOOL) 
+✅ **#symbol** constants 
+✅ **asm: … mov out rax** (directive lowering) 
+The only “big” remaining unsolved area (if we want literal fidelity) is: 
+* **variants/pattern matching (`Maybe<T>`, `case Some x`)** 
+This needs a tagged-union lawet + `MATCH_VARIANT_TAG` style opcodes, and optional jump-table lowering. 
+--- 
+# 5) One last hard requirement 
+To keep the whole pipeline deterministic: 
+### Mandate: 
+* `=` is **not** an expression. 
+* `let c6 = a = b` is a compile-time error. 
+Otherwise we’ll end up with a backend contract that can’t typecheck `c6` as `bool` without inventing coercions. 
+--- 
+
+variants now, fully bytes-level + mechanically specifiable.
+Below is the Variant/Match extension to the Emitter Contract Sheet v2 that covers:
+•	variant Maybe<T>: Some T / None
+•	let m1 Maybe<i64> = Some 123
+•	let m2 Maybe<i64> = None
+•	match m1: case Some x: … case None: … end
+•	payload binding (x)
+•	lawet + tag rules + exact x64 emission patterns
+•	canonical diagnostics + OSW hooks
+________________________________________
+1) Canonical Variant Memory Lawet (must be fixed)
+1.1 Variant lawet model (tagged union)
+Every variant V<T...> lowers to a concrete monomorphized lawet (no runtime reflection needed).
+Lawet fields:
+•	tag at offset TAG_OFF = 0
+•	payload at offset PAY_OFF = align_up(TAG_SIZE, PAY_ALIGN)
+•	TAG_SIZE = sizeof(tag_repr) (default u8)
+•	PAY_ALIGN = max(align(payload_alts...))
+•	PAY_SIZE = max(size(payload_alts...))
+•	SIZE = align_up(PAY_OFF + PAY_SIZE, ALIGN)
+•	ALIGN = max(align(tag_repr), PAY_ALIGN)
+Tag representation (default):
+•	tag_repr = u8 unless explicitly overridden (we didn’t override it in sample)
+1.2 Tag values (canonical)
+For a variant with N alternatives, tags are:
+•	alt[0] tag = 0
+•	alt[1] tag = 1
+•	…
+•	alt[i] tag = i
+So for:
+variant Maybe<T>:
+  Some T
+  None
+end
+Canonical mapping:
+•	None tag = 0
+•	Some tag = 1
+1.3 Example: Maybe<i64> lawet (wer sample)
+•	tag: u8 (size 1, align 1)
+•	payload union: only i64 (size 8, align 8)
+•	PAY_OFF = align_up(1, 8) = 8
+•	SIZE = align_up(8 + 8, 8) = 16
+•	ALIGN = 8
+Offsets:
+•	TAG_OFF = 0
+•	PAY_OFF = 8
+________________________________________
+2) Required Typed CIL Concepts (so backend is deterministic)
+Typed CIL must carry, for each variant instantiation:
+•	lawet_id
+•	tag_off (always 0 in this model)
+•	pay_off
+•	size, align
+•	per-alt payload type/size/align (or just union max)
+This is compile-time; emitter only needs constants like PAY_OFF.
+________________________________________
+3) Variant/Match Opcode Family (Emitter Contract)
+These opcodes are added to wer Typed CIL catalog.
+3.1 Address + tag ops
+OPCODE: VAR_ADDR_LOCAL(lawet_id, slot_disp32) -> RAX
+Compute address of a variant local on stack.
+•	Inputs: slot_disp32
+•	Output: RAX = &local_variant
+•	Clobbers: RAX
+•	Flags: none
+•	Bytes: 48 8D 84 24 [disp32] (lea rax, [rsp+disp32])
+•	Relocs: none
+(We can reuse ADDR_LOCAL from v2; this is just a typed alias.)
+________________________________________
+OPCODE: VAR_LOAD_TAG(lawet_id, base_reg) -> EAX
+Loads tag as zero-extended u32 in EAX.
+•	Inputs: base_reg (canonical: RAX)
+•	Output: EAX = tag (0..255)
+•	Clobbers: EAX
+•	Flags: none
+•	Bytes (base=RAX):
+0F B6 80 [tag_off32]
+For our model tag_off32=0, this becomes:
+o	0F B6 00 (movzx eax, byte ptr [rax])
+•	Relocs: none
+•	Errors:
+o	RANE_DIAG_INTERNAL_ERROR: missing lawet_id or base not an address value
+________________________________________
+OPCODE: VAR_TAG_EQ_IMM(lawet_id, imm_tag_u8) -> AL
+Compares loaded tag with an immediate and produces a bool in AL.
+Contract: tag is in EAX (from VAR_LOAD_TAG), then compare.
+•	Inputs: EAX holds tag
+•	Output: AL = 1 if tag == imm else 0
+•	Clobbers: AL, flags
+•	Flags: requires none; sets flags internally
+•	Bytes:
+o	83 F8 [imm8] (cmp eax, imm8)
+o	0F 94 C0 (sete al)
+•	Relocs: none
+________________________________________
+OPCODE: BR_ON_TAG(lawet_id, imm_tag_u8, L_match, L_nomatch)
+Branch if tag equals immediate.
+•	Inputs: EAX tag
+•	Output: control flow
+•	Clobbers: flags
+•	Flags: none
+•	Bytes:
+o	83 F8 [imm8] (cmp eax, imm8)
+o	0F 84 [rel32(L_match)] (je)
+o	E9 [rel32(L_nomatch)] (jmp)
+•	Relocs: Rel32_Jmp for both
+________________________________________
+3.2 Payload address/load/bind
+OPCODE: VAR_ADDR_PAYLOAD(lawet_id, base_reg) -> RAX
+Computes address of payload region (even if current tag is None).
+•	Inputs: base_reg (canonical: RAX)
+•	Output: RAX = base + PAY_OFF
+•	Clobbers: RAX
+•	Flags: none
+•	Bytes (base already RAX):
+48 8D 80 [pay_off32]
+•	Relocs: none
+For Maybe<i64>: pay_off32 = 8
+________________________________________
+OPCODE: VAR_LOAD_PAYLOAD_I64(lawet_id, base_reg) -> RAX
+Loads payload as i64 into RAX.
+•	Inputs: base address in RAX
+•	Output: RAX = payload_i64
+•	Clobbers: RAX
+•	Flags: none
+•	Bytes (base=RAX):
+48 8B 80 [pay_off32]
+•	Relocs: none
+•	Errors:
+o	RANE_DIAG_TYPE_MISMATCH: payload type is not i64 for that alt/lawet
+________________________________________
+OPCODE: VAR_STORE_PAYLOAD_I64(lawet_id, base_reg, src_reg64)
+Stores payload i64.
+Canonical constraint: keep base in RAX, store value from RDX.
+•	Inputs: RAX = base, RDX = value
+•	Output: memory updated
+•	Clobbers: flags unchanged
+•	Flags: none
+•	Bytes:
+o	48 89 90 [pay_off32] (mov [rax+pay_off], rdx)
+•	Relocs: none
+________________________________________
+3.3 Construction ops
+OPCODE: VAR_STORE_TAG_IMM(lawet_id, base_reg, imm_tag_u8)
+Writes tag byte.
+•	Inputs: RAX = base, imm8
+•	Output: memory updated
+•	Clobbers: none
+•	Flags: none
+•	Bytes:
+o	C6 80 [tag_off32] [imm8] (mov byte ptr [rax+off], imm8)
+•	Relocs: none
+For our model: tag_off32 = 0
+________________________________________
+OPCODE: VAR_CONSTRUCT_NONE(lawet_id, dest_base_reg)
+Constructs the “no-payload” alternative.
+•	Inputs: RAX = dest_base
+•	Output: variant initialized
+•	Clobbers: none
+•	Flags: none
+•	Bytes:
+o	C6 00 00 (mov byte ptr [rax], 0) ; tag=None
+o	(optional payload scrub, policy-driven; see 3.5)
+•	Relocs: none
+________________________________________
+OPCODE: VAR_CONSTRUCT_SOME_I64(lawet_id, dest_base_reg, src_reg64)
+Constructs payload alternative (for Some i64).
+•	Inputs: RAX = dest_base, RDX = payload_i64
+•	Output: variant initialized
+•	Clobbers: none
+•	Flags: none
+•	Bytes:
+1.	tag:
+	C6 00 01 (mov byte ptr [rax], 1) ; tag=Some
+2.	payload:
+	48 89 90 [pay_off32] (mov [rax+pay_off], rdx)
+•	Relocs: none
+________________________________________
+3.4 Match lowering opcodes (structured → CFG)
+Wer surface:
+match m1:
+  case Some x: print x
+  case None:   print "none"
+end
+Canonical lowering template (mechanical)
+Assume m1 is a local in slot(m1).
+1.	VAR_ADDR_LOCAL Maybe<i64>, slot(m1) -> RAX
+2.	VAR_LOAD_TAG Maybe<i64>, RAX -> EAX
+3.	BR_ON_TAG Maybe<i64>, 1, L_some, L_next
+4.	L_next: BR_ON_TAG Maybe<i64>, 0, L_none, L_default_or_trap
+5.	In L_some:
+o	bind x:
+	VAR_LOAD_PAYLOAD_I64 Maybe<i64>, RAX -> RAX (but careful: RAX currently base; see note below)
+6.	In L_none: …
+7.	If exhaustive: L_default_or_trap should be unreachable → TRAP
+Important base-address preservation rule
+Because many ops use RAX as both address and value, the Typed CIL lowering must preserve base across payload loads. Two canonical ways:
+Option A (recommended): keep base in RBX during match
+•	VAR_ADDR_LOCAL -> RBX (or move RAX→RBX)
+•	VAR_LOAD_TAG uses RBX
+•	VAR_LOAD_PAYLOAD_I64 uses RBX (loads into RAX)
+So we add one tiny helper opcode:
+OPCODE: MOVE_ADDR_RAX_TO_RBX
+•	Input: RAX
+•	Output: RBX
+•	Clobbers: RBX
+•	Bytes: 48 89 C3 (mov rbx, rax)
+Then match does:
+•	addr in RAX
+•	move to RBX
+•	tag/payload read using RBX
+•	payload ends up in RAX for printing/calls
+I’m going to standardize match-on-variant base in RBX to avoid “address in RAX vs value in RAX” fights.
+So update the variant address ops accordingly:
+•	When matching: base address must be in RBX
+•	When constructing: base address must be in RAX (fine)
+We’ll reflect that in the match templates below.
+________________________________________
+4) Fully bytes-level match example (Maybe)
+4.1 let m1 Maybe<i64> = Some 123
+Lowering (contracted):
+1.	compute address of m1 local:
+•	lea rax, [rsp+slot_m1]
+48 8D 84 24 [disp32]
+2.	move payload into RDX:
+•	mov rdx, 123
+48 BA 7B 00 00 00 00 00 00 00
+3.	construct Some:
+•	mov byte ptr [rax+0], 1
+C6 00 01
+•	mov qword ptr [rax+8], rdx
+48 89 90 08 00 00 00
+4.2 let m2 Maybe<i64> = None
+•	address:
+48 8D 84 24 [disp32]
+•	store tag 0:
+C6 00 00
+4.3 match m1: case Some x … case None … end
+Assume slot(m1) known.
+Tag dispatch:
+1.	lea rax, [rsp+slot_m1]
+48 8D 84 24 [disp32]
+2.	preserve base in RBX:
+48 89 C3
+3.	movzx eax, byte ptr [rbx+0]
+0F B6 03
+4.	cmp eax, 1
+83 F8 01
+5.	je L_some
+0F 84 [rel32]
+6.	cmp eax, 0
+83 F8 00
+7.	je L_none
+0F 84 [rel32]
+8.	ud2 (exhaustive guarantee)
+0F 0B
+L_some: bind x and run body
+•	bind x (payload load i64 into RAX):
+o	mov rax, qword ptr [rbx+8]
+48 8B 83 08 00 00 00
+•	then print x becomes arg placement + CALL_IMPORT print (already covered in v2 call family)
+L_none: body
+•	print "none" via rodata string pointer + call import
+________________________________________
+5) Variant opcode → exact emission templates table (one row per opcode)
+This is the “backend mechanically specifiable” portion.
+Typed CIL Opcode	Required inputs (reg/stack)	Output	Clobbers	Flags	Emitted bytes	Relocs
+VAR_LOAD_TAG(lawet, base=RBX)	RBX=base	EAX=tag	EAX	none	0F B6 03	none
+VAR_STORE_TAG_IMM(lawet, base=RAX, imm)	RAX=base	mem	none	none	C6 80 off32 imm8 (off32=0 ⇒ C6 00 imm)	none
+VAR_LOAD_PAYLOAD_I64(lawet, base=RBX)	RBX=base	RAX=payload	RAX	none	48 8B 83 pay_off32	none
+VAR_STORE_PAYLOAD_I64(lawet, base=RAX, src=RDX)	RAX=base, RDX=val	mem	none	none	48 89 90 pay_off32	none
+VAR_CONSTRUCT_NONE(lawet, base=RAX)	RAX=base	mem	none	none	C6 00 00	none
+VAR_CONSTRUCT_SOME_I64(lawet, base=RAX, val=RDX)	RAX=base, RDX=val	mem	none	none	C6 00 01 ; 48 89 90 pay_off32	none
+BR_ON_TAG(lawet, imm, Lm, Ln)	EAX=tag	CFG	flags	none	83 F8 imm8 ; 0F 84 rel32 ; E9 rel32	Rel32_Jmp
+MOVE_ADDR_RAX_TO_RBX	RAX	RBX	RBX	none	48 89 C3	none
+(If we prefer base always in RAX, we can—this RBX convention just prevents address/value collisions during payload binding.)
+________________________________________
+6) Diagnostics: canonical errors for variants + match
+These map cleanly to wer rane_diag_code_t set (from wer earlier diag header style).
+Parse / AST errors
+•	RANE_DIAG_PARSE_ERROR
+o	“invalid variant alternative syntax”
+o	“case pattern does not match any variant alternative”
+o	“duplicate case alternative: Some”
+o	“default not allowed on exhaustive match” (if we forbid it)
+Name/type errors
+•	RANE_DIAG_UNDEFINED_NAME
+o	unknown alt name in pattern: case Som x:
+•	RANE_DIAG_TYPE_MISMATCH
+o	payload binding type mismatch: case Some x where x declared incompatible
+o	constructing alt with wrong payload type: Some "hi" for Maybe<i64>
+o	accessing payload when alt has none: case None x: (invalid)
+•	RANE_DIAG_REDECLARED_NAME
+o	binding introduces a name that already exists in scope (unless we allow shadowing)
+Policy/capability errors (usually none for pure variants)
+•	Variants themselves don’t require capabilities, but if pattern body calls capability-gated ops, those checks still apply there.
+Internal errors (compiler bug class)
+•	RANE_DIAG_INTERNAL_ERROR
+o	missing lawet_id for monomorphized variant
+o	unknown pay_off32 at emission time
+o	trying to emit VAR_LOAD_PAYLOAD_I64 on a lawet whose payload isn’t i64
+Exhaustiveness (if we enforce it)
+•	RANE_DIAG_TYPE_MISMATCH or a dedicated diagnostic category later:
+o	“non-exhaustive match on Maybe: missing case None”
+•	If we allow non-exhaustive matches, the lowering must include a default trap or default branch.
+________________________________________
+7) OSW optimization hooks (variant-specific)
+These are the exact OSW expectations that become safe with this lawet/op set:
+1.	Construct then immediate match fold
+o	VAR_CONSTRUCT_NONE followed by VAR_LOAD_TAG/compare can fold to constant branch.
+2.	Dead payload stores
+o	If tag is None, payload region is semantically uninitialized; if we still zero it for determinism, OSW may remove the scrub if not observed.
+3.	Tag compare chain to jump table
+o	For variants with many alts, OSW can transform chained compares into a jump table. (That would introduce a new opcode later, but it’s an OSW optimization.)
+4.	Case block dominance for binds
+o	Payload load is only valid on the Some dominated region; OSW must keep that dominance relationship.
+________________________________________
+8) CIAM lowering rules (surface → Typed CIL) for the exact syntax we used
+8.1 Construction
+Surface:
+•	let m Maybe<i64> = Some 123
+Lower:
+•	allocate local m (stack slot)
+•	ADDR_LOCAL(slot(m)) -> RAX
+•	emit RDX = 123
+•	VAR_CONSTRUCT_SOME_I64(lawet=Maybe<i64>, base=RAX, val=RDX)
+Surface:
+•	let m Maybe<i64> = None
+Lower:
+•	ADDR_LOCAL -> RAX
+•	VAR_CONSTRUCT_NONE(lawet, RAX)
+8.2 Match
+Surface:
+match m:
+  case Some x: S1
+  case None:   S2
+end
+Lower:
+•	ADDR_LOCAL(m) -> RAX
+•	MOVE_ADDR_RAX_TO_RBX
+•	VAR_LOAD_TAG(lawet, RBX) -> EAX
+•	dispatch chain using BR_ON_TAG (tag 1 for Some, tag 0 for None)
+•	In Some block:
+o	VAR_LOAD_PAYLOAD_I64(lawet, RBX) -> RAX
+o	bind x to RAX (or store to local slot for x)
+•	In None block: no bind
+________________________________________
+
+here is a **single merged Appendix C** that: 
+1. **Incorporates the Variant opcode family** we just defined, and 
+2. Provides the **matching “Typed CIL opcode → exact emission template(s)” full table** for **all opcodes in the current backend feature set** (core + calls + mmio + variants) in one consistent row format. 
+I’m going to be extremely strict and mechanical so we can wire this directly into an emitter without interpretation. 
+--- 
+# Appendix C — Typed CIL Opcode Catalog (Current Feature Set) 
+## C.0 Canonical backend conventions (so templates are deterministic) 
+### C.0.1 Target + ABI 
+* **Target:** Windows x86-64 (MSVC ABI) 
+* **Arg regs:** `RCX, RDX, R8, R9` 
+* **Return reg:** `RAX` 
+* **Stack:** 16-byte aligned at *call sites*, 32 bytes shadow space reserved by caller for any call. 
+### C.0.2 Register role conventions (Typed CIL → x64) 
+To keep emission templates fixed: 
+* **Primary value reg:** `RAX` 
+* **Secondary value reg:** `RDX` 
+* **Address/base reg (preferred):** `RBX` (especially for loads/binds) 
+* **Scratch regs (optional):** `R10`, `R11` (caller-saved; use if needed) 
+* **Bool results:** `AL` (0/1), or `EAX` if widened 
+### C.0.3 Relocation record types (canonical names) 
+* `Rel32_Call(target)` — 32-bit relative call displacement patch 
+* `Rel32_Jmp(target)` — 32-bit relative jmp displacement patch 
+* `Rel32_Jcc(target)` — 32-bit relative conditional branch displacement patch 
+* `Rel32_RipDisp(target)` — RIP-relative disp32 for `lea/mov/call/jmp [rip+disp32]` 
+### C.0.4 Section model assumptions 
+* `.text` code 
+* `.rdata` for string literals / constants 
+* `.idata` for imports (IAT slots) 
+### C.0.5 “Current feature set” definition for this Appendix 
+This table covers the **emitter-visible** opcode set needed to compile wer demonstrated constructs: 
+* locals, addressing, loads/stores 
+* integer + boolean ops 
+* comparisons + branching 
+* function calls (imports + internal) 
+* returns 
+* trap/halt 
+* mmio reads/writes (volatile) 
+* variant construction + match dispatch + payload binding 
+> Concurrency primitives (`spawn/join/send/recv/mutex_lock`) are **treated as normal calls** to runtime imports in this backend catalog (the emitter does not need special opcodes beyond CALL_IMPORT + arg setup). Same for `print`, `open`, `eval`, etc. 
+--- 
+# Appendix C.1 — Typed CIL Opcode → Exact Emission Template(s) 
+**Column meanings** 
+* **Inputs:** required locations (regs/stack) 
+* **Outputs:** produced location(s) 
+* **Clobbers:** regs overwritten 
+* **Flags:** whether instruction relies on or modifies flags 
+* **Bytes:** exact hex template (placeholders shown as `[imm32]`, `[imm64]`, `[rel32]`, `[disp32]`) 
+* **Relocs:** relocation records generated (if any) 
+* **Canonical Errors:** what can go wrong at emit-time/typecheck-time 
+--- 
+## C.1.1 Prolog / Epilog / Stack 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes template(s) | Relocs | Canonical Errors | 
+| ---------------------------- | -------------------------- | ------------------ | -------- | ----- | ------------------------------------- | ------ | --------------------------------------------------------------------- | 
+| `PROLOG(frame_size_aligned)` | `frame_size_aligned` imm32 | stack frame active | `RSP` | none | `48 81 EC [imm32]` *(sub rsp, imm32)* | none | `INTERNAL_ERROR` if frame not 16-aligned or too large for chosen form | 
+| `EPILOG(frame_size_aligned)` | `frame_size_aligned` imm32 | stack restored | `RSP` | none | `48 81 C4 [imm32]` *(add rsp, imm32)* | none | same | 
+| `RET` | none | control flow | none | none | `C3` | none | none | 
+> If we use `push rbp / mov rbp,rsp` we can add those opcodes too, but the minimal prolog above is enough for leaf-ish codegens. 
+--- 
+## C.1.2 Addressing / Moves / Constants 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes template(s) | Relocs | Canonical Errors | 
+| ------------------------------------- | --------------------- | ------------------ | -------- | ----- | ----------------------------------------------- | ----------------------- | ---------------------------- | 
+| `ADDR_LOCAL(slot_disp32) -> RAX` | `slot_disp32` | `RAX=&local` | `RAX` | none | `48 8D 84 24 [disp32]` *(lea rax,[rsp+disp32])* | none | `INTERNAL_ERROR` bad slot | 
+| `MOVE_RAX_TO_RBX` | `RAX` | `RBX=RAX` | `RBX` | none | `48 89 C3` | none | none | 
+| `MOVE_RAX_TO_RDX` | `RAX` | `RDX=RAX` | `RDX` | none | `48 89 C2` | none | none | 
+| `MOV_RAX_IMM64(imm64)` | `imm64` | `RAX=imm64` | `RAX` | none | `48 B8 [imm64]` | none | none | 
+| `MOV_RDX_IMM64(imm64)` | `imm64` | `RDX=imm64` | `RDX` | none | `48 BA [imm64]` | none | none | 
+| `MOV_EAX_IMM32(imm32)` | `imm32` | `EAX=imm32` | `EAX` | none | `B8 [imm32]` | none | none | 
+| `MOVZX_EAX_MEM8(base=RBX, off32)` | `RBX=base` | `EAX=zeroext byte` | `EAX` | none | `0F B6 83 [off32]` | none | type mismatch if not u8 | 
+| `MOV_RAX_MEM64(base=RBX, off32)` | `RBX=base` | `RAX=qword` | `RAX` | none | `48 8B 83 [off32]` | none | type mismatch if not i64/u64 | 
+| `MOV_MEM64_RDX(base=RBX, off32)` | `RBX=base`, `RDX=val` | mem updated | none | none | `48 89 93 [off32]` | none | none | 
+| `MOV_MEM8_IMM(base=RBX, off32, imm8)` | `RBX=base` | mem updated | none | none | `C6 83 [off32] [imm8]` | none | none | 
+| `LEA_RCX_RIPREL(symbol)` | symbol | `RCX=&symbol` | `RCX` | none | `48 8D 0D [rel32]` *(lea rcx,[rip+rel32])* | `Rel32_RipDisp(symbol)` | undefined symbol | 
+--- 
+## C.1.3 Integer Arithmetic (i64/u64) 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes template(s) | Relocs | Canonical Errors | 
+| -------------------- | -------------------- | --------------------------------------- | --------- | ----- | ----------------------------------------- | ------ | -------------------------------------- | 
+| `ADD_RAX_RDX` | `RAX, RDX` | `RAX=RAX+RDX` | `RAX` | sets | `48 01 D0` *(add rax, rdx)* | none | type mismatch | 
+| `SUB_RAX_RDX` | `RAX, RDX` | `RAX=RAX-RDX` | `RAX` | sets | `48 29 D0` *(sub rax, rdx)* | none | type mismatch | 
+| `IMUL_RAX_RDX` | `RAX, RDX` | `RAX=RAX*RDX` | `RAX` | sets | `48 0F AF C2` *(imul rax, rdx)* | none | type mismatch | 
+| `NEG_RAX` | `RAX` | `RAX=-RAX` | `RAX` | sets | `48 F7 D8` | none | type mismatch | 
+| `INC_RAX` | `RAX` | `RAX++` | `RAX` | sets | `48 FF C0` | none | none | 
+| `DEC_RAX` | `RAX` | `RAX--` | `RAX` | sets | `48 FF C8` | none | none | 
+| `IDIV_RDXRAX_BY_RBX` | `RAX=num`, `RBX=den` | `RAX=quot`, `RDX=rem` | `RAX,RDX` | sets | `48 99` *(cqo)* ; `48 F7 FB` *(idiv rbx)* | none | division by 0 (runtime), type mismatch | 
+| `MOD_RDXRAX_BY_RBX` | same | `RDX=rem` (then move to RAX if desired) | `RAX,RDX` | sets | same as idiv | none | same | 
+> For `/` and `%` we typically lower: move numerator to RAX, denom to RBX, do `cqo; idiv rbx`. Quotient in RAX, remainder in RDX. 
+--- 
+## C.1.4 Bitwise ops + Shifts (i64/u64) 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes template(s) | Relocs | Canonical Errors | | 
+| ------------------- | ----------------- | ---------------- | --------- | ----- | ----------------- | ---------- | --------------------- | ------------- | 
+| `AND_RAX_RDX` | `RAX,RDX` | `RAX&=RDX` | `RAX` | sets | `48 21 D0` | none | type mismatch | | 
+| `OR_RAX_RDX` | `RAX,RDX` | `RAX | =RDX` | `RAX` | sets | `48 09 D0` | none | type mismatch | 
+| `XOR_RAX_RDX` | `RAX,RDX` | `RAX^=RDX` | `RAX` | sets | `48 31 D0` | none | type mismatch | | 
+| `NOT_RAX` | `RAX` | `RAX=~RAX` | `RAX` | sets | `48 F7 D0` | none | none | | 
+| `SHL_RAX_CL` | `RAX`, `CL=shift` | `RAX<<=CL` | `RAX` | sets | `48 D3 E0` | none | shift count not in CL | | 
+| `SHR_RAX_CL` | `RAX`, `CL=shift` | logical shift | `RAX` | sets | `48 D3 E8` | none | same | | 
+| `SAR_RAX_CL` | `RAX`, `CL=shift` | arithmetic shift | `RAX` | sets | `48 D3 F8` | none | same | | 
+| `MOV_CL_IMM8(imm8)` | imm8 | `CL=imm8` | `RCX` low | none | `B1 [imm8]` | none | none | | 
+--- 
+## C.1.5 Comparisons + Bool materialization 
+These are the mechanical building blocks for `if`, `while`, `match`, `goto cond -> L1 L2`, etc. 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes template(s) | Relocs | Canonical Errors | 
+| -------------------- | --------- | ----------------- | -------- | ----------- | --------------------------- | ------ | ---------------- | 
+| `CMP_RAX_RDX` | `RAX,RDX` | flags set | flags | sets | `48 39 D0` *(cmp rax, rdx)* | none | type mismatch | 
+| `CMP_EAX_IMM8(imm8)` | `EAX` | flags set | flags | sets | `83 F8 [imm8]` | none | none | 
+| `SETE_AL` | flags | `AL=ZF?1:0` | `AL` | reads flags | `0F 94 C0` | none | none | 
+| `SETNE_AL` | flags | `AL=!ZF` | `AL` | reads flags | `0F 95 C0` | none | none | 
+| `SETL_AL` | flags | signed `<` | `AL` | reads flags | `0F 9C C0` | none | none | 
+| `SETLE_AL` | flags | signed `<=` | `AL` | reads flags | `0F 9E C0` | none | none | 
+| `SETG_AL` | flags | signed `>` | `AL` | reads flags | `0F 9F C0` | none | none | 
+| `SETGE_AL` | flags | signed `>=` | `AL` | reads flags | `0F 9D C0` | none | none | 
+| `MOVZX_EAX_AL` | `AL` | `EAX=zeroext(AL)` | `EAX` | none | `0F B6 C0` | none | none | 
+--- 
+## C.1.6 Control flow: Labels + Branches + Trap/Halt 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes template(s) | Relocs | Canonical Errors | 
+| ------------------------ | ------ | ---------------- | -------- | ----- | ---------------------------------------- | -------------- | ---------------- | 
+| `LABEL(L)` | none | defines location | none | none | *(no bytes)* | none | duplicate label | 
+| `JMP(L)` | label | control flow | none | none | `E9 [rel32]` | `Rel32_Jmp(L)` | undefined label | 
+| `JE(L)` | flags | control flow | flags | reads | `0F 84 [rel32]` | `Rel32_Jcc(L)` | undefined label | 
+| `JNE(L)` | flags | control flow | flags | reads | `0F 85 [rel32]` | `Rel32_Jcc(L)` | undefined label | 
+| `JL(L)` | flags | signed < | flags | reads | `0F 8C [rel32]` | `Rel32_Jcc(L)` | undefined | 
+| `JLE(L)` | flags | signed <= | flags | reads | `0F 8E [rel32]` | `Rel32_Jcc(L)` | undefined | 
+| `JG(L)` | flags | signed > | flags | reads | `0F 8F [rel32]` | `Rel32_Jcc(L)` | undefined | 
+| `JGE(L)` | flags | signed >= | flags | reads | `0F 8D [rel32]` | `Rel32_Jcc(L)` | undefined | 
+| `UD2_TRAP` | none | abort | none | none | `0F 0B` | none | none | 
+| `INT3_TRAP` *(optional)* | none | breakpoint | none | none | `CC` | none | none | 
+| `HALT` | none | program end | none | none | `C3` *(or `F4` if ring0; don’t do that)* | none | none | 
+> In user code we have `trap` and `trap 7`. We can either: 
+> (a) always emit `ud2` and ignore code, or 
+> (b) move code into a reg and call an imported `rane_rt_trap(code)` then `ud2`. 
+> The backend catalog keeps it simple: `UD2_TRAP`. 
+--- 
+## C.1.7 Calls (imports + internal) 
+### Import call via IAT slot (Windows PE) 
+Canonical form: `call qword ptr [rip+disp32]` 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes template(s) | Relocs | Canonical Errors | 
+| ------------------------- | ---------- | --------- | ----------------- | ----- | ----------------- | --------------------------- | ---------------- | 
+| `CALL_IMPORT(iat_symbol)` | IAT symbol | `RAX=ret` | caller-saved regs | none | `FF 15 [rel32]` | `Rel32_RipDisp(iat_symbol)` | undefined import | 
+| `CALL_REL32(proc_label)` | label | `RAX=ret` | caller-saved regs | none | `E8 [rel32]` | `Rel32_Call(proc_label)` | undefined proc | 
+### Arg setup helpers (mechanical) 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes | Relocs | Errors | 
+| ---------------------------------- | -------------- | --------------------- | -------- | ----- | ------------------------------------------------------------------------------------------ | ------ | -------- | 
+| `ARG0_RCX_FROM_RAX` | `RAX` | `RCX=RAX` | `RCX` | none | `48 89 C1` | none | none | 
+| `ARG1_RDX_FROM_RAX` | `RAX` | `RDX=RAX` | `RDX` | none | `48 89 C2` | none | none | 
+| `ARG2_R8_FROM_RAX` | `RAX` | `R8=RAX` | `R8` | none | `49 89 C0` | none | none | 
+| `ARG3_R9_FROM_RAX` | `RAX` | `R9=RAX` | `R9` | none | `49 89 C1` | none | none | 
+| `SHADOW_AND_ALIGN(callsite_bytes)` | frame metadata | ensures rsp alignment | `RSP` | none | *(handled by Frame Planner + PROLOG; no direct bytes here unless we use callsite fixups)* | none | internal | 
+> The normal approach is: frame planner guarantees `rsp` alignment globally; each call uses shadow space reserved in frame (or dynamically with `sub rsp, 32` around call). If we want explicit per-call: add `SUB_RSP_32` / `ADD_RSP_32` opcodes. 
+Optional explicit shadow around call: 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes | Relocs | Errors | 
+| ------------ | ------ | --------- | -------- | ----- | ------------- | ------ | ------ | 
+| `SUB_RSP_32` | none | rsp -= 32 | `RSP` | none | `48 83 EC 20` | none | none | 
+| `ADD_RSP_32` | none | rsp += 32 | `RSP` | none | `48 83 C4 20` | none | none | 
+--- 
+## C.1.8 Loads/Stores for scalar locals (common patterns) 
+(We can do everything with `ADDR_LOCAL + MOV`, but these are common convenience opcodes.) 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes | Relocs | Errors | 
+| ------------------------------------- | ----------- | ----------- | -------- | ----- | ---------------------- | ------ | ------------- | 
+| `LOAD_LOCAL_I64(slot_disp32) -> RAX` | slot | `RAX=value` | `RAX` | none | `48 8B 84 24 [disp32]` | none | type mismatch | 
+| `STORE_LOCAL_I64(slot_disp32) <- RAX` | slot, `RAX` | mem updated | none | none | `48 89 84 24 [disp32]` | none | type mismatch | 
+| `LOAD_LOCAL_I32(slot_disp32) -> EAX` | slot | `EAX=value` | `EAX` | none | `8B 84 24 [disp32]` | none | type mismatch | 
+| `STORE_LOCAL_I32(slot_disp32) <- EAX` | slot, `EAX` | mem updated | none | none | `89 84 24 [disp32]` | none | type mismatch | 
+--- 
+## C.1.9 MMIO (volatile) read/write 
+Wer surface: 
+```rane 
+mmio region REG from 4096 size 256 
+read32 REG 0 into x 
+write32 REG 4 123 
+``` 
+Backend lowers to: absolute address = base(4096) + offset. 
+For user-mode PE, *absolute* addresses are valid only if the OS maps something there; but as a language feature, we still define emission. 
+### Absolute addressing form (canonical) 
+* Read32: `mov eax, dword ptr [imm64]` is not encodable directly in x64. 
+So we use: 
+1. `mov rbx, imm64` 
+2. `mov eax, dword ptr [rbx]` 
+Write32: 
+1. `mov rbx, imm64` 
+2. `mov dword ptr [rbx], imm32` (or via reg) 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes template(s) | Relocs | Errors | 
+| ----------------------------------------- | ------------ | ----------- | --------- | ----- | -------------------------------------------------------------- | ------ | -------------------------------------------- | 
+| `MMIO_READ32_ABS(imm64_addr) -> EAX` | imm64 | `EAX=value` | `RBX,EAX` | none | `48 BB [imm64]` *(mov rbx, imm64)* ; `8B 03` *(mov eax,[rbx])* | none | security/policy violation if mmio disallowed | 
+| `MMIO_WRITE32_ABS_IMM(imm64_addr, imm32)` | imm64, imm32 | mem updated | `RBX` | none | `48 BB [imm64]` ; `C7 03 [imm32]` *(mov dword [rbx], imm32)* | none | same | 
+| `MMIO_WRITE32_ABS_EAX(imm64_addr)` | imm64, `EAX` | mem updated | `RBX` | none | `48 BB [imm64]` ; `89 03` *(mov [rbx], eax)* | none | same | 
+> **CIAM/Resolver policy** should require `capability syscalls` or a specific `capability mmio` if we add it. Right now, treat it as capability-gated at compile time. 
+--- 
+## C.1.10 Variants (merged from our last step) 
+This is the exact variant opcode family, merged into the catalog. 
+### Lawet reminder for `Maybe<i64>` 
+* `tag_off32 = 0` 
+* `pay_off32 = 8` 
+* size 16 align 8 
+| Opcode | Inputs | Outputs | Clobbers | Flags | Bytes template(s) | Relocs | Canonical Errors | 
+| --------------------------------------------------- | --------------------- | --------------- | -------- | ---------- | ----------------------------------------------- | ------------------------ | -------------------------------- | 
+| `VAR_ADDR_LOCAL(lawet, slot_disp32) -> RAX` | slot | `RAX=&variant` | `RAX` | none | `48 8D 84 24 [disp32]` | none | internal slot error | 
+| `VAR_LOAD_TAG(lawet, base=RBX) -> EAX` | `RBX=base` | `EAX=tag` | `EAX` | none | `0F B6 03` *(movzx eax, byte [rbx])* | none | internal lawet error | 
+| `VAR_STORE_TAG_IMM(lawet, base=RAX, imm8)` | `RAX=base` | tag written | none | none | `C6 00 [imm8]` *(for off=0)* | none | internal lawet error | 
+| `VAR_LOAD_PAYLOAD_I64(lawet, base=RBX) -> RAX` | `RBX=base` | `RAX=payload` | `RAX` | none | `48 8B 83 [pay_off32]` | none | type mismatch if payload not i64 | 
+| `VAR_STORE_PAYLOAD_I64(lawet, base=RAX, val=RDX)` | `RAX=base`, `RDX=val` | payload written | none | none | `48 89 90 [pay_off32]` | none | type mismatch | 
+| `VAR_CONSTRUCT_NONE(lawet, base=RAX)` | `RAX=base` | variant init | none | none | `C6 00 00` | none | none | 
+| `VAR_CONSTRUCT_SOME_I64(lawet, base=RAX, val=RDX)` | `RAX=base`, `RDX=val` | variant init | none | none | `C6 00 01` ; `48 89 90 [pay_off32]` | none | type mismatch | 
+| `BR_ON_TAG(lawet, imm8, L_match, L_nomatch)` | `EAX=tag` | CFG | flags | sets/reads | `83 F8 [imm8]` ; `0F 84 [rel32]` ; `E9 [rel32]` | `Rel32_Jcc`, `Rel32_Jmp` | undefined labels | 
+| `MOVE_ADDR_RAX_TO_RBX` | `RAX` | `RBX=RAX` | `RBX` | none | `48 89 C3` | none | none | 
+--- 
+# Appendix C.2 — “Typed CIL opcode → exact emission template(s)” (Single full table) 
+The catalog above *is* already in the required “one row per opcode” consistent format. 
+But to match wer wording exactly (“generate the matching full table”), here’s the **consolidated list** in one uninterrupted sequence, grouped by subsystem, with no prose between entries: 
+## C.2.1 Consolidated emission table (all opcodes) 
+### Stack 
+* `PROLOG(frame_size_aligned)` → `48 81 EC [imm32]` 
+* `EPILOG(frame_size_aligned)` → `48 81 C4 [imm32]` 
+* `RET` → `C3` 
+* *(optional)* `SUB_RSP_32` → `48 83 EC 20` 
+* *(optional)* `ADD_RSP_32` → `48 83 C4 20` 
+### Addressing / moves / constants 
+* `ADDR_LOCAL(slot_disp32)->RAX` → `48 8D 84 24 [disp32]` 
+* `MOVE_RAX_TO_RBX` → `48 89 C3` 
+* `MOVE_RAX_TO_RDX` → `48 89 C2` 
+* `MOV_RAX_IMM64(imm64)` → `48 B8 [imm64]` 
+* `MOV_RDX_IMM64(imm64)` → `48 BA [imm64]` 
+* `MOV_EAX_IMM32(imm32)` → `B8 [imm32]` 
+* `MOVZX_EAX_MEM8(RBX,off32)` → `0F B6 83 [off32]` 
+* `MOV_RAX_MEM64(RBX,off32)` → `48 8B 83 [off32]` 
+* `MOV_MEM64_RDX(RBX,off32)` → `48 89 93 [off32]` 
+* `MOV_MEM8_IMM(RBX,off32,imm8)` → `C6 83 [off32] [imm8]` 
+* `LEA_RCX_RIPREL(symbol)` → `48 8D 0D [rel32]` + `Rel32_RipDisp(symbol)` 
+### Arithmetic (i64) 
+* `ADD_RAX_RDX` → `48 01 D0` 
+* `SUB_RAX_RDX` → `48 29 D0` 
+* `IMUL_RAX_RDX` → `48 0F AF C2` 
+* `NEG_RAX` → `48 F7 D8` 
+* `INC_RAX` → `48 FF C0` 
+* `DEC_RAX` → `48 FF C8` 
+* `IDIV_RDXRAX_BY_RBX` → `48 99` ; `48 F7 FB` 
+* `MOD_RDXRAX_BY_RBX` → same (use `RDX` result) 
+### Bitwise/shifts 
+* `AND_RAX_RDX` → `48 21 D0` 
+* `OR_RAX_RDX` → `48 09 D0` 
+* `XOR_RAX_RDX` → `48 31 D0` 
+* `NOT_RAX` → `48 F7 D0` 
+* `MOV_CL_IMM8(imm8)` → `B1 [imm8]` 
+* `SHL_RAX_CL` → `48 D3 E0` 
+* `SHR_RAX_CL` → `48 D3 E8` 
+* `SAR_RAX_CL` → `48 D3 F8` 
+### Compare / bool 
+* `CMP_RAX_RDX` → `48 39 D0` 
+* `CMP_EAX_IMM8(imm8)` → `83 F8 [imm8]` 
+* `SETE_AL` → `0F 94 C0` 
+* `SETNE_AL` → `0F 95 C0` 
+* `SETL_AL` → `0F 9C C0` 
+* `SETLE_AL` → `0F 9E C0` 
+* `SETG_AL` → `0F 9F C0` 
+* `SETGE_AL` → `0F 9D C0` 
+* `MOVZX_EAX_AL` → `0F B6 C0` 
+### Control flow 
+* `JMP(L)` → `E9 [rel32]` + `Rel32_Jmp(L)` 
+* `JE(L)` → `0F 84 [rel32]` + `Rel32_Jcc(L)` 
+* `JNE(L)` → `0F 85 [rel32]` + `Rel32_Jcc(L)` 
+* `JL(L)` → `0F 8C [rel32]` + `Rel32_Jcc(L)` 
+* `JLE(L)` → `0F 8E [rel32]` + `Rel32_Jcc(L)` 
+* `JG(L)` → `0F 8F [rel32]` + `Rel32_Jcc(L)` 
+* `JGE(L)` → `0F 8D [rel32]` + `Rel32_Jcc(L)` 
+* `UD2_TRAP` → `0F 0B` 
+* `HALT` → `C3` 
+### Calls + arg setup 
+* `ARG0_RCX_FROM_RAX` → `48 89 C1` 
+* `ARG1_RDX_FROM_RAX` → `48 89 C2` 
+* `ARG2_R8_FROM_RAX` → `49 89 C0` 
+* `ARG3_R9_FROM_RAX` → `49 89 C1` 
+* `CALL_IMPORT(iat_symbol)` → `FF 15 [rel32]` + `Rel32_RipDisp(iat_symbol)` 
+* `CALL_REL32(proc_label)` → `E8 [rel32]` + `Rel32_Call(proc_label)` 
+### Local scalar loads/stores (convenience) 
+* `LOAD_LOCAL_I64(slot)->RAX` → `48 8B 84 24 [disp32]` 
+* `STORE_LOCAL_I64(slot)<-RAX` → `48 89 84 24 [disp32]` 
+* `LOAD_LOCAL_I32(slot)->EAX` → `8B 84 24 [disp32]` 
+* `STORE_LOCAL_I32(slot)<-EAX` → `89 84 24 [disp32]` 
+### MMIO (absolute) 
+* `MMIO_READ32_ABS(imm64)->EAX` → `48 BB [imm64]` ; `8B 03` 
+* `MMIO_WRITE32_ABS_IMM(imm64,imm32)` → `48 BB [imm64]` ; `C7 03 [imm32]` 
+* `MMIO_WRITE32_ABS_EAX(imm64)` → `48 BB [imm64]` ; `89 03` 
+### Variants 
+* `VAR_ADDR_LOCAL(lawet,slot)->RAX` → `48 8D 84 24 [disp32]` 
+* `MOVE_ADDR_RAX_TO_RBX` → `48 89 C3` 
+* `VAR_LOAD_TAG(lawet,RBX)->EAX` → `0F B6 03` 
+* `VAR_STORE_TAG_IMM(lawet,RAX,imm8)` → `C6 00 [imm8]` *(tag_off=0)* 
+* `VAR_LOAD_PAYLOAD_I64(lawet,RBX)->RAX` → `48 8B 83 [pay_off32]` 
+* `VAR_STORE_PAYLOAD_I64(lawet,RAX,RDX)` → `48 89 90 [pay_off32]` 
+* `VAR_CONSTRUCT_NONE(lawet,RAX)` → `C6 00 00` 
+* `VAR_CONSTRUCT_SOME_I64(lawet,RAX,RDX)` → `C6 00 01` ; `48 89 90 [pay_off32]` 
+* `BR_ON_TAG(lawet,imm8,Lm,Ln)` → `83 F8 [imm8]` ; `0F 84 [rel32]` ; `E9 [rel32]` + relocs 
+--- 
+✅ “merge these variant opcodes into Appendix C” — done (C.1.10) 
+✅ “generate the matching Typed CIL opcode → exact emission template(s) full table for all opcodes (core + calls + mmio + variants) in the same consistent row format” — done (C.1.* tables + C.2 consolidated list) 
+--- 
 
