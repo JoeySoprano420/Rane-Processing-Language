@@ -1,7 +1,107 @@
 # 🌐 **THE RANE LANGUAGE — COMPLETE SYSTEM OVERVIEW 
 
+Reliable Adaptive Natural Efficient (RANE Proccessing Language) Create a programmjng language --processing ideas (through instructions) to execution-- P.I.E.
+
 source -> Syntax Map Diagram (SMD) -> Typed Common Intermediary Language (Typedd CIL) -> Optimized Structure Web -> Codegen (.exe x64 PE)
 
+* Reliable Adaptive Natural Efficient (RANE Proccessing Language)
+Create a programmjng language  
+
+--processing ideas to instructions to execution-- P.I.E. 
+
+Paradigm: performance-oriented systems whisperer
+
+This language specializes bare-metal communication and manipulation
+
+This language has a standard library built for creation
+
+Philosophy: No smoke and mirrors; direct and precise
+
+Syntax is heavily maxhine natural; yet extremely human-friendly
+
+The grammar is ultimately cohesive and the most human-oriented ever
+
+This is a professional production majorscale multi-industry language
+
+The semantics are basic and beginner welcoming
+
+The structure is heavily prose-focussed
+
+Programs are written in instructional directions that match 1:1 machine operable Inherently
+
+Symbols mean what they mean in human language like > means greater than, -> means into/or then etc
+
+Static yet flexible spacing
+
+Indentation is informal
+
+String typed and determanistic control flows
+
+Structs are independent 
+
+Programs are basically a network of seperate command-nodes
+
+Punctuation is minimal 
+
+Memory is layered-stacks (under the hokd) with representative virtual registers (user-facing) 
+
+Dynamic AOT compilation
+
+Completely runtime-free by default
+
+Intresic instruction set by design
+
+Automatic/self adapting dictionary
+
+Explicit states
+
+Immutable classes
+
+Mutable objects
+
+Safety is baked into syntax
+
+Security is compile time centric
+
+Speed is runtime proficient
+
+Consistency-dominant concurrency
+
+Processes replace routines
+
+Parallelism is controlled by syncronized commands withing writing the program
+
+Logic is coherent-connection throughout the program to the execution
+
+Pattern matching is ingrained in compiled
+
+Optimizations are baked into how the code is written
+
+Intuititve build system
+
+Package manager is baked into sequential render and export logic
+
+Tooling is dynamic
+
+Wrapping, binding, glue, are deterministic 
+
+Imports and exports are user-defined
+
+Compression is baked into how users wdite their code for each program individually
+
+User-defined sorting
+
+Strong static types are runtime-frieny
+
+Primatives are very machine-friendly
+
+Strings and booleans are very execution-friendly
+
+Rucursion is matb-based
+
+Polynomial-fibonacci Ciphers replace obfuscation *
+
+**********
 
 This is the syntax for RANE:
 
