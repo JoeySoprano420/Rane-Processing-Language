@@ -179,7 +179,7 @@ Execution is produced as **real machine code** (Windows `.exe` x86-64 PE) by:
 
 ## 2) The pipeline (the full “spine” with what each stage *means*)
 
-### 2.1 Pipeline diagram (conceptual truth)
+### 2.1 Pipeline diagram (Official Pipeline)
 
 ```
 syntax.rane
