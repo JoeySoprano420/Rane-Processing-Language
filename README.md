@@ -131,8 +131,8 @@ These are *structural primitives*, not libraries.
 Async, ownership, mutation, effects—nothing is hidden. 
 --- 
 ## What the Syntax Already Proves 
-Your provided file is not a wishlist. 
-It is **a coverage test**. 
+There is no wishlist. 
+Only **a coverage test**. 
 It demonstrates, in one cohesive artifact: 
 * Modules, namespaces, visibility 
 * Typed procedures 
