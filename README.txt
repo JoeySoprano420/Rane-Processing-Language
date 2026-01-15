@@ -1470,5 +1470,350 @@ Taglines:
 - **“Every effect is a contract.”**
 - **“From syntax to silicon, all accounted for.”**
 
+**********
+
+---
+
+**********
+
+Below you’ll find:
+
+1. **A full pipeline diagram** (ASCII + conceptual)
+2. **A CIAM Lifecycle Document** (formal, spec‑style)
+3. **A Whitepaper‑style explanation** (narrative, persuasive, architectural)
+
+Let’s dive in.
+
+---
+
+# 🜁 **1. Pipeline Diagram (New CIAM‑Everywhere Architecture)**
+
+## **1.1 High‑Level ASCII Diagram**
+
+```
+┌──────────────────────────┐
+│        syntax.rane        │
+└──────────────┬───────────┘
+               ▼
+        [ CIAM Expansion ]
+               ▼
+┌──────────────────────────┐
+│     Lexer / Tokenizer     │
+└──────────────┬───────────┘
+               ▼
+        [ CIAM Expansion ]
+               ▼
+┌──────────────────────────┐
+│          Parser           │
+└──────────────┬───────────┘
+               ▼
+        [ CIAM Expansion ]
+               ▼
+┌──────────────────────────┐
+│           AST             │
+└──────────────┬───────────┘
+               ▼
+        [ CIAM Expansion ]
+               ▼
+┌──────────────────────────┐
+│         Resolver          │
+└──────────────┬───────────┘
+               ▼
+        [ CIAM Expansion ]
+               ▼
+┌──────────────────────────┐
+│        Typed CIL          │
+└──────────────┬───────────┘
+               ▼
+        [ CIAM Expansion ]
+               ▼
+┌──────────────────────────┐
+│           OSW             │
+│   (Optimized Structure    │
+│           Web)            │
+└──────────────┬───────────┘
+               ▼
+        [ CIAM Expansion ]
+               ▼
+┌──────────────────────────┐
+│       Frame Planner       │
+└──────────────┬───────────┘
+               ▼
+        [ CIAM Expansion ]
+               ▼
+┌──────────────────────────┐
+│   Codegen / NASM Emit     │
+│     (.exe, .obj, .asm)    │
+└──────────────────────────┘
+```
+
+## **1.2 Conceptual Diagram (Layered)**
+
+```
+           ┌──────────────────────────────┐
+           │        Surface Syntax         │
+           └──────────────┬───────────────┘
+                          ▼
+           ┌──────────────────────────────┐
+           │   Structural Interpretation   │
+           └──────────────┬───────────────┘
+                          ▼
+           ┌──────────────────────────────┐
+           │   Semantic Interpretation     │
+           └──────────────┬───────────────┘
+                          ▼
+           ┌──────────────────────────────┐
+           │   Canonical IR Generation    │
+           └──────────────┬───────────────┘
+                          ▼
+           ┌──────────────────────────────┐
+           │     Optimization Graph       │
+           └──────────────┬───────────────┘
+                          ▼
+           ┌──────────────────────────────┐
+           │     Machine Lowering         │
+           └──────────────────────────────┘
+
+At every boundary: CIAMs
+```
+
+---
+
+# 🜂 **2. CIAM Lifecycle Document (Formal Spec)**
+
+## **2.1 Overview**
+A **CIAM (Contextual Inference Abstraction Macro)** is a deterministic, capability‑gated transformation unit that can operate at any compiler stage. CIAMs unify syntax expansion, semantic inference, IR rewriting, optimization, and backend shaping into a single conceptual model.
+
+CIAMs are:
+
+- **Deterministic**
+- **Stage‑scoped**
+- **Context‑aware**
+- **Capability‑checked**
+- **Purely compile‑time**
+- **Auditable**
+
+---
+
+## **2.2 CIAM Lifecycle Stages**
+
+### **Stage 0 — Registration**
+- CIAMs declare:
+  - Stage(s) they operate on  
+  - Required capabilities  
+  - Input pattern  
+  - Output pattern  
+  - Invariants they preserve  
+
+### **Stage 1 — Invocation Context Construction**
+At each pipeline boundary, the compiler constructs a **CIAM Context Object** containing:
+
+- Current stage  
+- AST/IR fragment  
+- Symbol table snapshot  
+- Capability environment  
+- Type environment  
+- Ownership/linearity state  
+- Optimization metadata  
+- Target architecture metadata  
+
+### **Stage 2 — Matching**
+CIAMs match against:
+
+- Syntax patterns  
+- AST node shapes  
+- IR instruction sequences  
+- Capability signatures  
+- Type signatures  
+- Control‑flow patterns  
+
+Matching is deterministic and ordered.
+
+### **Stage 3 — Expansion / Transformation**
+CIAMs may:
+
+- Rewrite syntax  
+- Insert AST nodes  
+- Infer capabilities  
+- Insert borrows/frees  
+- Lower constructs  
+- Rewrite IR blocks  
+- Insert optimization hints  
+- Modify frame layout metadata  
+- Influence codegen lowering  
+
+### **Stage 4 — Validation**
+After expansion:
+
+- Type invariants checked  
+- Capability invariants checked  
+- Linearity invariants checked  
+- Stage‑specific invariants checked  
+- CIAM‑introduced constructs validated  
+
+### **Stage 5 — Commit**
+The transformed structure becomes the new canonical representation for the next stage.
+
+### **Stage 6 — Audit Logging**
+Each CIAM expansion is logged:
+
+- CIAM name  
+- Stage  
+- Input pattern  
+- Output pattern  
+- Invariants preserved  
+- Resulting structure hash  
+
+This enables deterministic builds and reproducible debugging.
+
+---
+
+## **2.3 CIAM Safety Rules**
+- CIAMs cannot introduce nondeterminism  
+- CIAMs cannot violate capability boundaries  
+- CIAMs cannot break type or ownership invariants  
+- CIAMs cannot modify global compiler state  
+- CIAMs cannot depend on runtime values  
+
+---
+
+## **2.4 CIAM Stages Summary Table**
+
+| Stage | CIAM Role |
+|-------|-----------|
+| syntax.rane | DSL expansion, keyword interpretation |
+| Lexer | semantic tokenization |
+| Parser | grammar rewriting, sugar expansion |
+| AST | structural lowering |
+| Resolver | capability inference, ownership inference |
+| Typed CIL | IR rewriting, safety enforcement |
+| OSW | optimization injection |
+| Frame Planner | ABI shaping, stack layout |
+| Codegen | instruction rewriting, target‑specific lowering |
+
+---
+
+# 🜃 **3. Whitepaper‑Style Explanation of the Architecture**
+
+## **3.1 Abstract**
+This document introduces a new compiler architecture for the RANE language in which **Contextual Inference Abstraction Macros (CIAMs)** operate at every stage of the pipeline. This transforms the compiler from a linear translation engine into a **multi‑stage semantic machine** capable of deterministic inference, domain‑specific extensibility, and cross‑stage reasoning.
+
+---
+
+## **3.2 Introduction**
+Traditional compilers treat macros, semantic analysis, optimization, and code generation as isolated phases. RANE rejects this separation. Instead, it introduces CIAMs as a **unified inference substrate** that permeates the entire pipeline.
+
+This architecture enables:
+
+- Deterministic macro expansion  
+- Context‑aware syntax rewriting  
+- Capability‑driven semantic inference  
+- IR‑level transformations  
+- Domain‑specific optimization  
+- ABI‑aware backend shaping  
+
+All within a single conceptual framework.
+
+---
+
+## **3.3 Motivation**
+Modern languages struggle with:
+
+- Fragmented macro systems  
+- Ad‑hoc lowering rules  
+- Hard‑coded optimizations  
+- Rigid backend pipelines  
+- Poor domain‑specific extensibility  
+
+CIAMs solve this by providing:
+
+- A uniform interface  
+- A deterministic execution model  
+- A capability‑gated safety layer  
+- A multi‑stage inference mechanism  
+
+---
+
+## **3.4 Architecture Overview**
+The RANE pipeline is divided into nine stages:
+
+1. syntax.rane  
+2. Lexer  
+3. Parser  
+4. AST  
+5. Resolver  
+6. Typed CIL  
+7. OSW  
+8. Frame Planner  
+9. Codegen  
+
+At each boundary, CIAMs are invoked with full contextual information.
+
+This creates a **layered inference stack** where each stage enriches the program with additional structure, semantics, and guarantees.
+
+---
+
+## **3.5 CIAMs as a Unified Semantic Fabric**
+CIAMs unify:
+
+- Syntax macros  
+- Semantic inference  
+- IR rewriting  
+- Optimization passes  
+- ABI shaping  
+- Backend lowering  
+
+into a single deterministic mechanism.
+
+This eliminates the conceptual fragmentation found in:
+
+- C++ templates  
+- Rust procedural macros  
+- LLVM passes  
+- Swift SILGen  
+- Java annotation processors  
+
+RANE becomes a **meta‑language** capable of evolving without breaking.
+
+---
+
+## **3.6 Determinism and Auditability**
+Every CIAM expansion is:
+
+- Logged  
+- Hashed  
+- Validated  
+- Reproducible  
+
+This enables:
+
+- Deterministic builds  
+- Reproducible debugging  
+- Formal verification  
+- Capability‑based safety  
+
+---
+
+## **3.7 Extensibility**
+Because CIAMs operate at every stage, RANE supports:
+
+- Domain‑specific syntax  
+- Domain‑specific IR  
+- Domain‑specific optimizations  
+- Domain‑specific ABIs  
+- Domain‑specific codegen patterns  
+
+All without modifying the compiler core.
+
+---
+
+## **3.8 Conclusion**
+This architecture positions RANE as a new category of language:
+
+> **A deterministic, multi‑stage, inference‑driven meta‑compiler with a unified semantic substrate.**
+
+It is not merely a compiler pipeline.  
+It is a **semantic machine**.
+
 ---
 
