@@ -1,0 +1,1188 @@
+// grammar.rane
+// RANE Surface Grammar (covering the exact constructs demonstrated in the sample)
+// Format: grammar-as-data, written in RANE syntax.
+// This file is meant to be consumed by a parser generator / hand-parser inside the RANE toolchain.
+//
+// Conventions:
+// - Nonterminals are written as "nt:<Name>"
+// - Terminals are written as "tk:<TOKEN>"
+// - Optional is "opt(<...>)"
+// - Repetition is "rep0(<...>)" / "rep1(<...>)"
+// - Alternatives are "alt(<a> <b> ...)"
+// - Grouping is "grp(<...>)"
+// - Literals are written as tk:STRING / tk:INT, etc (lexed forms)
+
+module grammar_root
+
+namespace rane_grammar:
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 0) Core DSL nodes (grammar-as-data)
+  ///////////////////////////////////////////////////////////////////////////
+
+  enum Assoc i32:
+    Left  = 0
+    Right = 1
+    None  = 2
+  end
+
+  struct Prec:
+    name string
+    level i32
+    assoc Assoc
+  end
+
+  struct Rule:
+    lhs string          # "nt:Something"
+    rhs string          # pattern DSL string
+    note string
+  end
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 1) Lexer tokens (what the grammar expects the lexer to produce)
+  ///////////////////////////////////////////////////////////////////////////
+
+  // NOTE: This token list is intentionally aligned to the shown program:
+  // keywords, operators, punctuation, literals, and a few needed helpers.
+
+  enum Tok i32:
+    # Identifiers / literals
+    IDENT     = 1
+    INT       = 2
+    FLOAT     = 3
+    STRING    = 4
+    CHAR      = 5
+    SYMBOL    = 6        # #name
+    NULLKW    = 7        # null
+    TRUEKW    = 8        # true
+    FALSEKW   = 9        # false
+
+    # Layout / trivia (if your lexer emits them)
+    NEWLINE   = 20
+    INDENT    = 21
+    DEDENT    = 22
+    COMMENT   = 23
+
+    # Keywords (top-level / decl)
+    IMPORT    = 40       # import
+    MODULE    = 41       # module
+    NAMESPACE = 42       # namespace
+    PROC      = 43       # proc
+    TYPE      = 44       # type
+    TYPEALIAS = 45       # typealias
+    ALIAS     = 46       # alias
+    CONST     = 47       # const
+    CONSTEXPR = 48       # constexpr
+    CONSTINIT = 49       # constinit
+    CONSTEVAL = 50       # consteval
+
+    STRUCT    = 60       # struct
+    ENUM      = 61       # enum
+    VARIANT   = 62       # variant
+    UNION     = 63       # union
+
+    MMIO      = 70       # mmio
+    REGION    = 71       # region
+    FROM      = 72       # from
+    SIZE      = 73       # size
+    CAPABILITY= 74       # capability
+    CONTRACT  = 75       # contract
+    ENSURES   = 76       # ensures
+    REQUIRES  = 77       # requires
+
+    MACRO     = 80       # macro
+    TEMPLATE  = 81       # template
+    MUTEX     = 82       # mutex
+    CHANNEL   = 83       # channel
+    ASYNC     = 84       # async
+    DEDICATE  = 85       # dedicate
+    LINEAR    = 86       # linear
+    NONLINEAR = 87       # nonlinear
+
+    ADMIN     = 90       # admin
+    PROTECTED = 91       # protected
+    PUBLIC    = 92       # public
+    PRIVATE   = 93       # private
+    EXPORT    = 94       # export
+    INLINE    = 95       # inline
+
+    # Statements / control
+    LET       = 110      # let
+    SET       = 111      # set
+    ADD       = 112      # add
+    BY        = 113      # by
+    MUTATE    = 114      # mutate
+    TO        = 115      # to
+    BORROW    = 116      # borrow
+    FREE      = 117      # free
+    ALLOCATE  = 118      # allocate
+    RETURN    = 119      # return
+    IF        = 120      # if
+    ELSE      = 121      # else
+    WHILE     = 122      # while
+    FOR       = 123      # for
+    MATCH     = 124      # match
+    CASE      = 125      # case
+    DEFAULT   = 126      # default
+    SWITCH    = 127      # switch
+    DECIDE    = 128      # decide
+    TRY       = 129      # try
+    CATCH     = 130      # catch
+    FINALLY   = 131      # finally
+    THROW     = 132      # throw
+    ASSERT    = 133      # assert
+    WITH      = 134      # with
+    AS        = 135      # as
+    DEFER     = 136      # defer
+    LOCK      = 137      # lock
+    SPAWN     = 138      # spawn
+    JOIN      = 139      # join
+    AWAIT     = 140      # await
+    SEND      = 141      # send
+    RECV      = 142      # recv
+
+    ASM       = 150      # asm
+    PRAGMA    = 151      # pragma   (string-based pragma)
+    HASHPRAGMA= 152      # #pragma  (directive form)
+    DEFINE    = 153      # define
+
+    # Low-level / node-machine
+    NODE      = 170      # node
+    START     = 171      # start
+    AT        = 172      # at
+    GO        = 173      # go
+    SAY       = 174      # say
+    HALT      = 175      # halt
+    GOTO      = 176      # goto
+    LABEL     = 177      # label
+    TRAP      = 178      # trap
+
+    # MMIO ops / addr ops
+    READ32    = 190      # read32
+    WRITE32   = 191      # write32
+    ADDRKW    = 192      # addr
+    LOAD      = 193      # load
+    STORE     = 194      # store
+    INTO      = 195      # into
+
+    # Collection constructors
+    VECTOR    = 210      # vector
+    MAP       = 211      # map
+    CHOOSE    = 212      # choose
+    MAXKW     = 213      # max
+    MINKW     = 214      # min
+
+    # Block terminator
+    END       = 240      # end
+
+    # Punctuation / separators
+    COLON     = 300      # :
+    SEMI      = 301      # ;
+    COMMA     = 302      # ,
+    DOT       = 303      # .
+    DCOLON    = 304      # ::
+    ARROW     = 305      # ->
+    LPAREN    = 306      # (
+    RPAREN    = 307      # )
+    LBRACK    = 308      # [
+    RBRACK    = 309      # ]
+    LBRACE    = 310      # {
+    RBRACE    = 311      # }
+    QMARK     = 312      # ?
+    AT_SIGN   = 313      # @
+
+    # Operators (word + symbolic)
+    PLUS      = 400      # +
+    MINUS     = 401      # -
+    STAR      = 402      # *
+    SLASH     = 403      # /
+    PERCENT   = 404      # %
+    TILDE     = 405      # ~
+    BANG      = 406      # !
+    EQ        = 407      # =
+    EQEQ      = 408      # ==
+    NEQ       = 409      # !=
+    LT        = 410      # <
+    LTE       = 411      # <=
+    GT        = 412      # >
+    GTE       = 413      # >=
+    AMP       = 414      # &
+    BAR       = 415      # |
+    CARET     = 416      # ^
+    ANDKW     = 417      # and
+    ORKW      = 418      # or
+    XORKW     = 419      # xor
+    ANDAND    = 420      # &&
+    OROR      = 421      # ||
+    SHLKW     = 422      # shl
+    SHRK     = 423       # shr
+    SARKW     = 424      # sar
+    LTLT      = 425      # <<
+    GTGT      = 426      # >>
+  end
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 2) Expression precedence (covers shown operators)
+  ///////////////////////////////////////////////////////////////////////////
+
+  const PRECS [12]Prec = [
+    Prec: name "ternary" level 10 assoc Assoc.Right end
+    Prec: name "logical_or" level 20 assoc Assoc.Left end
+    Prec: name "logical_and" level 30 assoc Assoc.Left end
+    Prec: name "bit_or" level 40 assoc Assoc.Left end
+    Prec: name "bit_xor" level 50 assoc Assoc.Left end
+    Prec: name "bit_and" level 60 assoc Assoc.Left end
+    Prec: name "compare" level 70 assoc Assoc.Left end
+    Prec: name "shift" level 80 assoc Assoc.Left end
+    Prec: name "add" level 90 assoc Assoc.Left end
+    Prec: name "mul" level 100 assoc Assoc.Left end
+    Prec: name "unary" level 110 assoc Assoc.Right end
+    Prec: name "postfix" level 120 assoc Assoc.Left end
+  ]
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 3) Grammar rules (surface form; indentation-based blocks)
+  ///////////////////////////////////////////////////////////////////////////
+
+  const RULES [220]Rule = [
+
+    ///////////////////////////////////////////////////////////////////////////
+    // File / top-level
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:File"
+      rhs "rep0(nt:TopItem)"
+      note "A file is a sequence of top-level items."
+    end
+
+    Rule: lhs "nt:TopItem"
+      rhs "alt(nt:ImportDecl nt:ModuleDecl nt:NamespaceDecl nt:TypeDecl nt:AliasDecl nt:ConstDecl nt:ProcDecl nt:StructDecl nt:EnumDecl nt:VariantDecl nt:UnionDecl nt:MmioDecl nt:CapabilityDecl nt:ContractDecl nt:MacroDecl nt:TemplateDecl nt:MutexDecl nt:ChannelDecl nt:PragmaDecl nt:DefineDecl nt:NodeModuleDecl nt:StartAtDecl)"
+      note "All constructs demonstrated as top-level."
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Imports / module / namespace
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:ImportDecl"
+      rhs "tk:IMPORT nt:ImportPath"
+      note "import rane_rt_print  |  import math::square"
+    end
+
+    Rule: lhs "nt:ImportPath"
+      rhs "alt(nt:IdentPath nt:ScopedPath)"
+      note "Supports bare module path and scoped import path."
+    end
+
+    Rule: lhs "nt:IdentPath"
+      rhs "tk:IDENT rep0(grp(tk:DOT tk:IDENT))"
+      note "foo.bar.baz (if enabled)."
+    end
+
+    Rule: lhs "nt:ScopedPath"
+      rhs "tk:IDENT rep1(grp(tk:DCOLON tk:IDENT))"
+      note "math::square"
+    end
+
+    Rule: lhs "nt:ModuleDecl"
+      rhs "tk:MODULE tk:IDENT"
+      note "module demo_root"
+    end
+
+    Rule: lhs "nt:NamespaceDecl"
+      rhs "tk:NAMESPACE tk:IDENT tk:COLON nt:Block(nt:NamespaceItem)"
+      note "namespace math: ... end"
+    end
+
+    Rule: lhs "nt:NamespaceItem"
+      rhs "alt(nt:ProcDecl nt:ImportDecl nt:TypeDecl nt:AliasDecl nt:ConstDecl nt:StructDecl nt:EnumDecl nt:VariantDecl nt:UnionDecl nt:MacroDecl nt:TemplateDecl nt:PragmaDecl nt:DefineDecl)"
+      note "What can appear inside namespace blocks."
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Visibility / modifiers for procs
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:ProcDecl"
+      rhs "nt:ProcHead nt:ProcBody"
+      note "All proc forms, including inline and consteval."
+    end
+
+    Rule: lhs "nt:ProcHead"
+      rhs "rep0(nt:ProcModifier) tk:PROC tk:IDENT opt(nt:GenericParams) opt(nt:ParamList) opt(nt:SigArrowRet) opt(nt:RequiresClause) opt(nt:ProcHeadColonOrInline)"
+      note "Supports: 'export inline proc square x i64 -> i64:' and 'proc f() -> i32 { ... }' lowered form."
+    end
+
+    Rule: lhs "nt:ProcModifier"
+      rhs "alt(tk:PUBLIC tk:PRIVATE tk:PROTECTED tk:ADMIN tk:EXPORT tk:INLINE tk:ASYNC tk:DEDICATE tk:LINEAR tk:NONLINEAR tk:CONSTEVAL)"
+      note "Modifiers shown in source."
+    end
+
+    Rule: lhs "nt:GenericParams"
+      rhs "alt(grp(tk:LT tk:IDENT rep0(grp(tk:COMMA tk:IDENT)) tk:GT) grp(tk:LT tk:IDENT tk:GT))"
+      note "identity<T> and Maybe<i64> style."
+    end
+
+    Rule: lhs "nt:ParamList"
+      rhs "alt(nt:ParamListParen nt:ParamListJuxta opt(nt:ParamListParen))"
+      note "Supports both paren params (lowered form) and juxtaposition params (surface)."
+    end
+
+    Rule: lhs "nt:ParamListParen"
+      rhs "tk:LPAREN opt(nt:Param rep0(grp(tk:COMMA nt:Param))) tk:RPAREN"
+      note "proc f(a: i64, b: i64)"
+    end
+
+    Rule: lhs "nt:ParamListJuxta"
+      rhs "rep1(nt:ParamJuxta)"
+      note "proc add5 a i64 b i64 ..."
+    end
+
+    Rule: lhs "nt:Param"
+      rhs "tk:IDENT opt(grp(tk:COLON nt:TypeRef)) opt(grp(nt:TypeRef))"
+      note "Param in lowered form uses ':', surface uses 'name Type'."
+    end
+
+    Rule: lhs "nt:ParamJuxta"
+      rhs "tk:IDENT nt:TypeRef"
+      note "a i64"
+    end
+
+    Rule: lhs "nt:SigArrowRet"
+      rhs "tk:ARROW nt:TypeRef"
+      note "-> i64"
+    end
+
+    Rule: lhs "nt:RequiresClause"
+      rhs "tk:REQUIRES nt:RequiresList"
+      note "requires network_io | requires(heap_alloc, threads, ...)"
+    end
+
+    Rule: lhs "nt:RequiresList"
+      rhs "alt(nt:RequiresBare nt:RequiresParen)"
+      note "Bare list vs parenthesized list."
+    end
+
+    Rule: lhs "nt:RequiresBare"
+      rhs "rep1(tk:IDENT)"
+      note "requires network_io"
+    end
+
+    Rule: lhs "nt:RequiresParen"
+      rhs "tk:LPAREN tk:IDENT rep0(grp(tk:COMMA tk:IDENT)) tk:RPAREN"
+      note "requires(heap_alloc, threads)"
+    end
+
+    Rule: lhs "nt:ProcHeadColonOrInline"
+      rhs "alt(tk:COLON nt:InlineBraceOpen)"
+      note "Surface uses ':' to begin block; lowered uses '{'."
+    end
+
+    Rule: lhs "nt:InlineBraceOpen"
+      rhs "opt(tk:LBRACE)"
+      note "Present in lowered grammar form; surface parser can ignore."
+    end
+
+    Rule: lhs "nt:ProcBody"
+      rhs "alt(nt:IndentedStmtBlock nt:InlineStmtBlock)"
+      note "Supports both colon+end and brace blocks."
+    end
+
+    Rule: lhs "nt:IndentedStmtBlock"
+      rhs "nt:Block(nt:Stmt)"
+      note "Statements until 'end'."
+    end
+
+    Rule: lhs "nt:InlineStmtBlock"
+      rhs "tk:LBRACE rep0(nt:StmtInlineSep) tk:RBRACE"
+      note "Lowered form with ';' separators."
+    end
+
+    Rule: lhs "nt:StmtInlineSep"
+      rhs "nt:Stmt opt(tk:SEMI)"
+      note "stmt;"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Types / aliases / consts
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:TypeDecl"
+      rhs "tk:TYPE tk:IDENT"
+      note "type i64"
+    end
+
+    Rule: lhs "nt:AliasDecl"
+      rhs "alt(nt:TypeAliasDecl nt:SimpleAliasDecl)"
+      note "typealias word = u32  |  alias int32 = i32"
+    end
+
+    Rule: lhs "nt:TypeAliasDecl"
+      rhs "tk:TYPEALIAS tk:IDENT tk:EQ nt:TypeRef"
+      note "typealias word = u32"
+    end
+
+    Rule: lhs "nt:SimpleAliasDecl"
+      rhs "tk:ALIAS tk:IDENT tk:EQ nt:TypeRef"
+      note "alias int32 = i32"
+    end
+
+    Rule: lhs "nt:ConstDecl"
+      rhs "alt(nt:ConstValueDecl nt:ConstProcDecl)"
+      note "const/constexpr/constinit values and consteval proc."
+    end
+
+    Rule: lhs "nt:ConstValueDecl"
+      rhs "nt:ConstKind tk:IDENT nt:TypeRef tk:EQ nt:Expr"
+      note "const PI f64 = 3.14"
+    end
+
+    Rule: lhs "nt:ConstKind"
+      rhs "alt(tk:CONST tk:CONSTEXPR tk:CONSTINIT)"
+      note "const | constexpr | constinit"
+    end
+
+    Rule: lhs "nt:ConstProcDecl"
+      rhs "tk:CONSTEVAL tk:PROC tk:IDENT opt(nt:ParamList) tk:ARROW nt:TypeRef tk:COLON nt:Block(nt:Stmt)"
+      note "consteval proc const_fn -> i64: ..."
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Attributes
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:AttrListOpt"
+      rhs "opt(rep1(nt:Attr))"
+      note "Optional attribute lines before decls."
+    end
+
+    Rule: lhs "nt:Attr"
+      rhs "tk:AT_SIGN tk:IDENT opt(nt:AttrArgs)"
+      note "@derive Eq Ord Debug  OR @derive(Eq, Ord, Debug)"
+    end
+
+    Rule: lhs "nt:AttrArgs"
+      rhs "alt(nt:AttrArgsParen nt:AttrArgsJuxta)"
+      note "Either paren args or space args."
+    end
+
+    Rule: lhs "nt:AttrArgsParen"
+      rhs "tk:LPAREN tk:IDENT rep0(grp(tk:COMMA tk:IDENT)) tk:RPAREN"
+      note "@derive(Eq, Ord, Debug)"
+    end
+
+    Rule: lhs "nt:AttrArgsJuxta"
+      rhs "rep1(tk:IDENT)"
+      note "@derive Eq Ord Debug"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Struct / enum / variant / union
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:StructDecl"
+      rhs "nt:AttrListOpt tk:STRUCT tk:IDENT opt(nt:GenericParams) tk:COLON nt:Block(nt:FieldDecl)"
+      note "struct Person: name string ..."
+    end
+
+    Rule: lhs "nt:FieldDecl"
+      rhs "tk:IDENT nt:TypeFieldSep nt:TypeRef"
+      note "name string  |  name: string"
+    end
+
+    Rule: lhs "nt:TypeFieldSep"
+      rhs "opt(tk:COLON)"
+      note "Allows both styles."
+    end
+
+    Rule: lhs "nt:EnumDecl"
+      rhs "tk:ENUM tk:IDENT opt(nt:EnumBaseType) tk:COLON nt:Block(nt:EnumItem)"
+      note "enum Flags u8: ... end"
+    end
+
+    Rule: lhs "nt:EnumBaseType"
+      rhs "alt(nt:TypeRef grp(tk:COLON nt:TypeRef))"
+      note "Flags u8 (surface) or Flags : u8 (lowered)."
+    end
+
+    Rule: lhs "nt:EnumItem"
+      rhs "tk:IDENT opt(grp(tk:EQ nt:Expr))"
+      note "ReadWrite = Read | Write"
+    end
+
+    Rule: lhs "nt:VariantDecl"
+      rhs "tk:VARIANT tk:IDENT opt(nt:GenericParams) tk:COLON nt:Block(nt:VariantArm)"
+      note "variant Maybe<T>: Some T  None"
+    end
+
+    Rule: lhs "nt:VariantArm"
+      rhs "alt(grp(tk:IDENT nt:TypeRef) tk:IDENT)"
+      note "Some T  |  None"
+    end
+
+    Rule: lhs "nt:UnionDecl"
+      rhs "tk:UNION tk:IDENT tk:COLON nt:Block(nt:UnionField)"
+      note "union IntOrFloat: i i32 ..."
+    end
+
+    Rule: lhs "nt:UnionField"
+      rhs "tk:IDENT nt:TypeFieldSep nt:TypeRef"
+      note "i i32"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // MMIO / capabilities / contract
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:MmioDecl"
+      rhs "tk:MMIO tk:REGION tk:IDENT tk:FROM nt:Expr tk:SIZE nt:Expr"
+      note "mmio region REG from 4096 size 256"
+    end
+
+    Rule: lhs "nt:CapabilityDecl"
+      rhs "tk:CAPABILITY tk:IDENT"
+      note "capability heap_alloc"
+    end
+
+    Rule: lhs "nt:ContractDecl"
+      rhs "tk:CONTRACT tk:IDENT tk:IDENT nt:TypeRef tk:COLON nt:Block(nt:ContractClause)"
+      note "contract positive x i64: ensures x > 0 end"
+    end
+
+    Rule: lhs "nt:ContractClause"
+      rhs "tk:ENSURES nt:Expr"
+      note "ensures x > 0"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Macro / template / mutex / channel
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:MacroDecl"
+      rhs "tk:MACRO tk:IDENT rep1(tk:IDENT) tk:EQ nt:Expr"
+      note "macro SQUARE x = x * x"
+    end
+
+    Rule: lhs "nt:TemplateDecl"
+      rhs "tk:TEMPLATE tk:IDENT"
+      note "template T"
+    end
+
+    Rule: lhs "nt:MutexDecl"
+      rhs "tk:MUTEX tk:IDENT"
+      note "mutex m1"
+    end
+
+    Rule: lhs "nt:ChannelDecl"
+      rhs "tk:CHANNEL tk:LT nt:TypeRef tk:GT tk:IDENT"
+      note "channel<int> ch"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Pragmas / define
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:PragmaDecl"
+      rhs "alt(nt:HashPragmaDecl nt:StringPragmaDecl)"
+      note "#pragma unroll 4 | pragma \"optimize\" \"speed\""
+    end
+
+    Rule: lhs "nt:HashPragmaDecl"
+      rhs "tk:HASHPRAGMA tk:IDENT opt(nt:PragmaArg)"
+      note "#pragma unroll 4"
+    end
+
+    Rule: lhs "nt:StringPragmaDecl"
+      rhs "tk:PRAGMA tk:STRING tk:STRING"
+      note "pragma \"lto\" \"on\""
+    end
+
+    Rule: lhs "nt:PragmaArg"
+      rhs "alt(nt:Expr tk:STRING)"
+      note "4 or \"hot\""
+    end
+
+    Rule: lhs "nt:DefineDecl"
+      rhs "tk:DEFINE tk:IDENT nt:Expr"
+      note "define BUILD_ID 0xDEADBEEF"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Node-machine module (module demo_struct; node ...; start at node ...)
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:NodeModuleDecl"
+      rhs "tk:MODULE tk:IDENT"
+      note "module demo_struct"
+    end
+
+    Rule: lhs "nt:NodeDecl"
+      rhs "tk:NODE tk:IDENT tk:COLON nt:Block(nt:NodeStmt)"
+      note "node start: ... end"
+    end
+
+    Rule: lhs "nt:StartAtDecl"
+      rhs "tk:START tk:AT tk:NODE tk:IDENT"
+      note "start at node start"
+    end
+
+    Rule: lhs "nt:NodeStmt"
+      rhs "alt(nt:NodeSetStmt nt:NodeAddStmt nt:NodeSayStmt nt:NodeGoStmt nt:HaltStmt)"
+      note "Node-machine statements demonstrated."
+    end
+
+    Rule: lhs "nt:NodeSetStmt"
+      rhs "tk:SET tk:IDENT nt:TypeAnnotOpt tk:TO nt:NodeRhs"
+      note "set h Header to Header: ... end | set h.version to 2"
+    end
+
+    Rule: lhs "nt:TypeAnnotOpt"
+      rhs "opt(nt:TypeRef)"
+      note "Optional 'Header' after variable name."
+    end
+
+    Rule: lhs "nt:NodeRhs"
+      rhs "alt(nt:StructInit nt:Expr)"
+      note "Either structured init or expression."
+    end
+
+    Rule: lhs "nt:NodeAddStmt"
+      rhs "tk:ADD nt:LValue tk:BY nt:Expr"
+      note "add h.size by 512"
+    end
+
+    Rule: lhs "nt:NodeSayStmt"
+      rhs "tk:SAY tk:STRING"
+      note "say \"ok\""
+    end
+
+    Rule: lhs "nt:NodeGoStmt"
+      rhs "tk:GO tk:TO tk:NODE tk:IDENT"
+      note "go to node end_node"
+    end
+
+    Rule: lhs "nt:HaltStmt"
+      rhs "tk:HALT"
+      note "halt"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Statements (procedural)
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:Stmt"
+      rhs "alt(nt:LetStmt nt:SetStmt nt:AddStmt nt:MutateStmt nt:ReturnStmt nt:IfStmt nt:WhileStmt nt:ForStmt nt:MatchStmt nt:SwitchStmt nt:DecideStmt nt:TryStmt nt:ThrowStmt nt:AssertStmt nt:WithStmt nt:DeferStmt nt:LockStmt nt:SendStmt nt:RecvStmt nt:ExprStmt nt:AsmStmt nt:GotoStmt nt:LabelStmt nt:TrapStmt nt:HaltStmt nt:NodeDecl)"
+      note "NodeDecl allowed as top-level too; included for completeness."
+    end
+
+    Rule: lhs "nt:LetStmt"
+      rhs "tk:LET tk:IDENT opt(grp(nt:TypeRef)) tk:EQ nt:Expr"
+      note "let x i64 = 0  |  let f = open path"
+    end
+
+    Rule: lhs "nt:SetStmt"
+      rhs "tk:SET nt:LValue tk:TO nt:Expr"
+      note "set u.i to 10"
+    end
+
+    Rule: lhs "nt:AddStmt"
+      rhs "tk:ADD nt:LValue tk:BY nt:Expr"
+      note "add h.size by 512"
+    end
+
+    Rule: lhs "nt:MutateStmt"
+      rhs "tk:MUTATE nt:LValue tk:TO nt:Expr"
+      note "mutate p[0] to 10"
+    end
+
+    Rule: lhs "nt:ReturnStmt"
+      rhs "tk:RETURN opt(nt:Expr)"
+      note "return x"
+    end
+
+    Rule: lhs "nt:IfStmt"
+      rhs "tk:IF nt:CondExpr tk:COLON nt:Block(nt:Stmt) opt(nt:ElsePart)"
+      note "if x < 0: ... else: ... end"
+    end
+
+    Rule: lhs "nt:ElsePart"
+      rhs "tk:ELSE tk:COLON nt:Block(nt:Stmt)"
+      note "else: ... end"
+    end
+
+    Rule: lhs "nt:WhileStmt"
+      rhs "tk:WHILE nt:CondExpr tk:COLON nt:Block(nt:Stmt)"
+      note "while i < 10: ..."
+    end
+
+    Rule: lhs "nt:ForStmt"
+      rhs "tk:FOR nt:ForHeader tk:COLON nt:Block(nt:Stmt)"
+      note "for let i i64 = 0; i < n; i = i + 1: ..."
+    end
+
+    Rule: lhs "nt:ForHeader"
+      rhs "alt(nt:ForCStyle nt:ForEachStyle)"
+      note "Only C-style loop shown; foreach slot kept."
+    end
+
+    Rule: lhs "nt:ForCStyle"
+      rhs "tk:LET tk:IDENT nt:TypeRef tk:EQ nt:Expr tk:SEMI nt:Expr tk:SEMI nt:AssignExpr"
+      note "let i i64 = 0; i < iter; i = i + 1"
+    end
+
+    Rule: lhs "nt:ForEachStyle"
+      rhs "tk:IDENT tk:IN tk:IDENT"
+      note "Reserved for future; not shown."
+    end
+
+    Rule: lhs "nt:MatchStmt"
+      rhs "tk:MATCH nt:Expr tk:COLON nt:Block(nt:MatchArm)"
+      note "match m1: case Some x: ... end"
+    end
+
+    Rule: lhs "nt:MatchArm"
+      rhs "alt(nt:MatchCaseArm nt:MatchDefaultArm)"
+      note "case pattern: stmt | default: stmt"
+    end
+
+    Rule: lhs "nt:MatchCaseArm"
+      rhs "tk:CASE nt:Pattern tk:COLON rep1(nt:StmtInline)"
+      note "case Some x: print x"
+    end
+
+    Rule: lhs "nt:MatchDefaultArm"
+      rhs "tk:DEFAULT tk:COLON rep1(nt:StmtInline)"
+      note "default: print \"other\""
+    end
+
+    Rule: lhs "nt:SwitchStmt"
+      rhs "tk:SWITCH nt:Expr tk:COLON nt:Block(nt:SwitchArm)"
+      note "switch x: case 0: ..."
+    end
+
+    Rule: lhs "nt:DecideStmt"
+      rhs "tk:DECIDE nt:Expr tk:COLON nt:Block(nt:SwitchArm)"
+      note "decide x: case 1: ..."
+    end
+
+    Rule: lhs "nt:SwitchArm"
+      rhs "alt(nt:SwitchCaseArm nt:SwitchDefaultArm)"
+      note "case and default arms."
+    end
+
+    Rule: lhs "nt:SwitchCaseArm"
+      rhs "tk:CASE nt:Expr tk:COLON rep1(nt:StmtInline)"
+      note "case 0: print \"zero\""
+    end
+
+    Rule: lhs "nt:SwitchDefaultArm"
+      rhs "tk:DEFAULT tk:COLON rep1(nt:StmtInline)"
+      note "default: print \"other\""
+    end
+
+    Rule: lhs "nt:TryStmt"
+      rhs "tk:TRY tk:COLON nt:Block(nt:Stmt) opt(nt:CatchPart) opt(nt:FinallyPart)"
+      note "try: ... catch e: ... finally: ... end"
+    end
+
+    Rule: lhs "nt:CatchPart"
+      rhs "tk:CATCH tk:IDENT tk:COLON nt:Block(nt:Stmt)"
+      note "catch e: ..."
+    end
+
+    Rule: lhs "nt:FinallyPart"
+      rhs "tk:FINALLY tk:COLON nt:Block(nt:Stmt)"
+      note "finally: ..."
+    end
+
+    Rule: lhs "nt:ThrowStmt"
+      rhs "tk:THROW nt:Expr"
+      note "throw 100"
+    end
+
+    Rule: lhs "nt:AssertStmt"
+      rhs "tk:ASSERT nt:Expr tk:STRING"
+      note "assert x != 0 \"msg\""
+    end
+
+    Rule: lhs "nt:WithStmt"
+      rhs "tk:WITH tk:IDENT nt:Expr tk:AS tk:IDENT tk:COLON nt:Block(nt:Stmt)"
+      note "with open path as f: ..."
+    end
+
+    Rule: lhs "nt:DeferStmt"
+      rhs "tk:DEFER nt:Expr"
+      note "defer close f"
+    end
+
+    Rule: lhs "nt:LockStmt"
+      rhs "tk:LOCK tk:IDENT tk:COLON nt:Block(nt:Stmt)"
+      note "lock m1: ... end"
+    end
+
+    Rule: lhs "nt:SendStmt"
+      rhs "tk:SEND tk:IDENT nt:Expr"
+      note "send ch 11"
+    end
+
+    Rule: lhs "nt:RecvStmt"
+      rhs "tk:RECV tk:IDENT"
+      note "recv ch (used as expr via nt:Expr too; stmt form kept)."
+    end
+
+    Rule: lhs "nt:AsmStmt"
+      rhs "tk:ASM tk:COLON nt:AsmLines tk:END"
+      note "asm: ... end"
+    end
+
+    Rule: lhs "nt:AsmLines"
+      rhs "rep0(tk:IDENT rep0(tk:IDENT))"
+      note "Lexer may tokenize assembly as raw lines; parser may treat as blob."
+    end
+
+    Rule: lhs "nt:GotoStmt"
+      rhs "tk:GOTO nt:Expr tk:ARROW tk:IDENT tk:IDENT"
+      note "goto (1 == 1) -> L_true L_false"
+    end
+
+    Rule: lhs "nt:LabelStmt"
+      rhs "tk:LABEL tk:IDENT tk:COLON"
+      note "label L_true:"
+    end
+
+    Rule: lhs "nt:TrapStmt"
+      rhs "tk:TRAP opt(nt:Expr)"
+      note "trap 7 | trap"
+    end
+
+    Rule: lhs "nt:ExprStmt"
+      rhs "nt:Expr"
+      note "Function call used as statement (print ...)."
+    end
+
+    Rule: lhs "nt:StmtInline"
+      rhs "alt(nt:ExprStmt nt:ReturnStmt nt:SetStmt nt:AddStmt nt:MutateStmt)"
+      note "Single-line statement in case arms."
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Block wrapper (indentation-based with 'end')
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:Block(X)"
+      rhs "rep1(X) tk:END"
+      note "Generic: one or more X then 'end'. (Real parser uses INDENT/DEDENT too.)"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Patterns (match arms)
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:Pattern"
+      rhs "alt(nt:PatVariant nt:PatLiteral tk:IDENT)"
+      note "case Some x | case None | case 0"
+    end
+
+    Rule: lhs "nt:PatVariant"
+      rhs "tk:IDENT opt(nt:PatBind)"
+      note "Some x"
+    end
+
+    Rule: lhs "nt:PatBind"
+      rhs "tk:IDENT"
+      note "bind identifier"
+    end
+
+    Rule: lhs "nt:PatLiteral"
+      rhs "alt(tk:INT tk:STRING tk:TRUEKW tk:FALSEKW tk:NULLKW)"
+      note "literal patterns"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Types
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:TypeRef"
+      rhs "alt(nt:TypeSimple nt:TypeGeneric nt:TypeArray nt:TypeTuple)"
+      note "i64 | Maybe<i64> | [5]i64 | (i64 string bool)"
+    end
+
+    Rule: lhs "nt:TypeSimple"
+      rhs "tk:IDENT"
+      note "Builtins and user types."
+    end
+
+    Rule: lhs "nt:TypeGeneric"
+      rhs "tk:IDENT tk:LT nt:TypeRef rep0(grp(tk:COMMA nt:TypeRef)) tk:GT"
+      note "Maybe<i64>"
+    end
+
+    Rule: lhs "nt:TypeArray"
+      rhs "tk:LBRACK nt:Expr tk:RBRACK nt:TypeRef"
+      note "[5]i64"
+    end
+
+    Rule: lhs "nt:TypeTuple"
+      rhs "tk:LPAREN nt:TypeRef rep1(nt:TypeRef) tk:RPAREN"
+      note "(i64 string bool) — surface style."
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Expressions
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:Expr"
+      rhs "nt:ExprTernary"
+      note "Entry point."
+    end
+
+    Rule: lhs "nt:ExprTernary"
+      rhs "alt(grp(nt:ExprOr tk:QMARK nt:Expr tk:COLON nt:Expr) nt:ExprOr)"
+      note "c ? a : b"
+    end
+
+    Rule: lhs "nt:ExprOr"
+      rhs "nt:ExprAnd rep0(grp(nt:OrOp nt:ExprAnd))"
+      note "or / ||"
+    end
+
+    Rule: lhs "nt:OrOp"
+      rhs "alt(tk:ORKW tk:OROR)"
+      note "or / ||"
+    end
+
+    Rule: lhs "nt:ExprAnd"
+      rhs "nt:ExprBitOr rep0(grp(nt:AndOp nt:ExprBitOr))"
+      note "and / &&"
+    end
+
+    Rule: lhs "nt:AndOp"
+      rhs "alt(tk:ANDKW tk:ANDAND)"
+      note "and / &&"
+    end
+
+    Rule: lhs "nt:ExprBitOr"
+      rhs "nt:ExprBitXor rep0(grp(tk:BAR nt:ExprBitXor))"
+      note "|"
+    end
+
+    Rule: lhs "nt:ExprBitXor"
+      rhs "nt:ExprBitAnd rep0(grp(nt:XorOp nt:ExprBitAnd))"
+      note "^ / xor"
+    end
+
+    Rule: lhs "nt:XorOp"
+      rhs "alt(tk:CARET tk:XORKW)"
+      note "^ / xor"
+    end
+
+    Rule: lhs "nt:ExprBitAnd"
+      rhs "nt:ExprCmp rep0(grp(tk:AMP nt:ExprCmp))"
+      note "&"
+    end
+
+    Rule: lhs "nt:ExprCmp"
+      rhs "nt:ExprShift rep0(grp(nt:CmpOp nt:ExprShift))"
+      note "< <= > >= == !="
+    end
+
+    Rule: lhs "nt:CmpOp"
+      rhs "alt(tk:LT tk:LTE tk:GT tk:GTE tk:EQEQ tk:NEQ)"
+      note "comparisons"
+    end
+
+    Rule: lhs "nt:ExprShift"
+      rhs "nt:ExprAdd rep0(grp(nt:ShiftOp nt:ExprAdd))"
+      note "shl shr sar << >>"
+    end
+
+    Rule: lhs "nt:ShiftOp"
+      rhs "alt(tk:SHLKW tk:SHRK tk:SARKW tk:LTLT tk:GTGT)"
+      note "shift operators"
+    end
+
+    Rule: lhs "nt:ExprAdd"
+      rhs "nt:ExprMul rep0(grp(nt:AddOp nt:ExprMul))"
+      note "+ -"
+    end
+
+    Rule: lhs "nt:AddOp"
+      rhs "alt(tk:PLUS tk:MINUS)"
+      note "+ -"
+    end
+
+    Rule: lhs "nt:ExprMul"
+      rhs "nt:ExprUnary rep0(grp(nt:MulOp nt:ExprUnary))"
+      note "* / %"
+    end
+
+    Rule: lhs "nt:MulOp"
+      rhs "alt(tk:STAR tk:SLASH tk:PERCENT)"
+      note "* / %"
+    end
+
+    Rule: lhs "nt:ExprUnary"
+      rhs "alt(grp(nt:UnaryOp nt:ExprUnary) nt:ExprPostfix)"
+      note "-x  !x  not x  ~x"
+    end
+
+    Rule: lhs "nt:UnaryOp"
+      rhs "alt(tk:MINUS tk:BANG tk:TILDE tk:ANDKW)"
+      note "Includes 'not' via ANDKW? If lexer has NOT token, swap here."
+    end
+
+    Rule: lhs "nt:ExprPostfix"
+      rhs "nt:Primary rep0(nt:Postfix)"
+      note "calls, member access, index, generic call."
+    end
+
+    Rule: lhs "nt:Postfix"
+      rhs "alt(nt:CallPostfix nt:MemberPostfix nt:IndexPostfix nt:CastPostfix)"
+      note "f x | f(x) | a.b | a[0] | (y as i64)"
+    end
+
+    Rule: lhs "nt:CallPostfix"
+      rhs "alt(nt:CallParen nt:CallJuxta)"
+      note "Both call styles are allowed."
+    end
+
+    Rule: lhs "nt:CallParen"
+      rhs "tk:LPAREN opt(nt:Expr rep0(grp(tk:COMMA nt:Expr))) tk:RPAREN"
+      note "f(1, 2)"
+    end
+
+    Rule: lhs "nt:CallJuxta"
+      rhs "rep1(nt:Primary)"
+      note "print x | add5 1 2 3 4 5 | identity<i64> sum"
+    end
+
+    Rule: lhs "nt:MemberPostfix"
+      rhs "tk:DOT tk:IDENT"
+      note "p.x | vec.len"
+    end
+
+    Rule: lhs "nt:IndexPostfix"
+      rhs "tk:LBRACK nt:Expr tk:RBRACK"
+      note "arr[0]"
+    end
+
+    Rule: lhs "nt:CastPostfix"
+      rhs "tk:AS nt:TypeRef"
+      note "(y0 as i64)"
+    end
+
+    Rule: lhs "nt:Primary"
+      rhs "alt(nt:Literal nt:ParenExpr nt:TupleExpr nt:StructInit nt:ArrayLit nt:MapLit nt:VectorLit nt:ChooseExpr nt:AddrExpr nt:LoadExpr nt:StoreExpr nt:RecvExpr nt:AwaitExpr nt:SpawnExpr nt:JoinExpr tk:IDENT tk:SYMBOL)"
+      note "Primary expression forms demonstrated."
+    end
+
+    Rule: lhs "nt:Literal"
+      rhs "alt(tk:INT tk:FLOAT tk:STRING tk:CHAR tk:TRUEKW tk:FALSEKW tk:NULLKW)"
+      note "literal constants"
+    end
+
+    Rule: lhs "nt:ParenExpr"
+      rhs "tk:LPAREN nt:Expr tk:RPAREN"
+      note "(a < b)"
+    end
+
+    Rule: lhs "nt:TupleExpr"
+      rhs "tk:LPAREN nt:Expr rep1(nt:Expr) tk:RPAREN"
+      note "(1 \"hi\" true) surface tuple"
+    end
+
+    Rule: lhs "nt:ArrayLit"
+      rhs "tk:LBRACK opt(nt:Expr rep0(nt:Expr)) tk:RBRACK"
+      note "[1 2 3] surface array literal (comma-less)."
+    end
+
+    Rule: lhs "nt:VectorLit"
+      rhs "tk:VECTOR nt:Expr rep0(nt:Expr)"
+      note "vector 1 2 3"
+    end
+
+    Rule: lhs "nt:MapLit"
+      rhs "tk:MAP nt:MapPair rep0(nt:MapPair)"
+      note "map \"a\" -> 1 \"b\" -> 2"
+    end
+
+    Rule: lhs "nt:MapPair"
+      rhs "nt:Expr tk:ARROW nt:Expr"
+      note "\"a\" -> 1"
+    end
+
+    Rule: lhs "nt:ChooseExpr"
+      rhs "tk:CHOOSE alt(tk:MAXKW tk:MINKW tk:IDENT) nt:Expr nt:Expr"
+      note "choose max a b"
+    end
+
+    Rule: lhs "nt:AddrExpr"
+      rhs "tk:ADDRKW nt:Expr nt:Expr nt:Expr nt:Expr"
+      note "addr 4096 4 8 16"
+    end
+
+    Rule: lhs "nt:LoadExpr"
+      rhs "tk:LOAD nt:TypeRef tk:ADDRKW nt:Expr nt:Expr nt:Expr nt:Expr"
+      note "load u32 addr 4096 0 1 0"
+    end
+
+    Rule: lhs "nt:StoreExpr"
+      rhs "tk:STORE nt:TypeRef tk:ADDRKW nt:Expr nt:Expr nt:Expr nt:Expr nt:Expr"
+      note "store u32 addr 4096 0 1 8 7"
+    end
+
+    Rule: lhs "nt:RecvExpr"
+      rhs "tk:RECV tk:IDENT"
+      note "recv ch"
+    end
+
+    Rule: lhs "nt:AwaitExpr"
+      rhs "tk:AWAIT nt:Expr"
+      note "await async_fetch"
+    end
+
+    Rule: lhs "nt:SpawnExpr"
+      rhs "tk:SPAWN nt:Expr"
+      note "spawn spawn_worker 100000"
+    end
+
+    Rule: lhs "nt:JoinExpr"
+      rhs "tk:JOIN nt:Expr"
+      note "join th1"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Condition expression (allows parens)
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:CondExpr"
+      rhs "alt(nt:Expr nt:ParenExpr)"
+      note "if (f & Flags.Write): ..."
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // LValues
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:LValue"
+      rhs "tk:IDENT rep0(alt(nt:MemberPostfix nt:IndexPostfix))"
+      note "h.version | p[0] | u.i"
+    end
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Struct initialization (surface + lowered-ish)
+    ///////////////////////////////////////////////////////////////////////////
+
+    Rule: lhs "nt:StructInit"
+      rhs "tk:IDENT tk:COLON rep1(nt:StructInitField) tk:END"
+      note "Header: magic 0x... version 1 ... end"
+    end
+
+    Rule: lhs "nt:StructInitField"
+      rhs "tk:IDENT nt:Expr"
+      note "field value (surface style)."
+    end
+
+  ]  # end RULES table
+
+end  # end namespace rane_grammar
