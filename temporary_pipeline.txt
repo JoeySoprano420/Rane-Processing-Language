@@ -1,0 +1,15 @@
+syntax.rane
+   ↓
+Lexer / Tokenizer
+   ↓
+Parser
+   ↓
+AST
+   ↓
+Resolver
+   ↓
+Typed CIL
+   ↓
+Frame Planner
+   ↓
+NASM Emitters
