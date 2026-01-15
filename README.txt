@@ -1,1819 +1,1315 @@
-# 🌐 **THE RANE LANGUAGE — COMPLETE SYSTEM OVERVIEW 
+# 🌐 THE RANE LANGUAGE — COMPLETE SYSTEM OVERVIEW
 
-Reliable Adaptive Natural Efficient (RANE Proccessing Language) Create a programmjng language --processing ideas (through instructions) to execution-- P.I.E.
+**Reliable Adaptive Natural Efficient (RANE Processing Language)**
+**P.I.E. = Processing Ideas → Instructions → Execution**
 
+RANE is designed as a *systems whisperer*: you write clear, human-shaped instructional prose, and the toolchain deterministically turns it into machine-operable structure and then into real Windows x86-64 PE executable code.
+
+RANE’s identity is not “a syntax that compiles.” It’s an **execution civilization**: language + staged transformations + capability security + deterministic concurrency + inspectable IR + an emitter that can produce `.exe` output.
+
+---
+
+## 0) The spine: what RANE *is* in one sentence
+
+**RANE is a deterministic, capability-gated systems language whose compilation pipeline is a sequence of audited structural transformations (CIAMs) from human-friendly instruction prose into a Typed IR web that lowers into Windows x64 machine code.**
+
+---
+
+## 1) P.I.E. — the mission statement (Processing Ideas → Instructions → Execution)
+
+### 1.1 “Processing ideas”
+
+This is the phase where you’re still thinking like a human: *What do I want done?*
+RANE supports this by letting your code read like:
+
+* “with open path as f”
+* “defer close f”
+* “start at node start”
+* “go to node end_node”
+* “choose max a b”
+* “requires network_io”
+
+RANE is intentionally shaped so your **intent** remains visible even when the compiler becomes aggressive.
+
+### 1.2 “Instructions”
+
+RANE programs are *instructional directions* that map 1:1 into operable internal forms. That means:
+
+* Every construct becomes an explicit node shape.
+* Every effect is explicitly gated.
+* Every operation has a defined evaluation order.
+* “Sugar” is not magic—CIAMs rewrite it into canonical instruction structure.
+
+### 1.3 “Execution”
+
+Execution is produced as **real machine code** (Windows `.exe` x86-64 PE) by:
+
+* lowering Typed CIL into an optimization graph (OSW),
+* planning frames and ABI compliance,
+* selecting instructions and emitting bytes / or NASM-compatible output,
+* producing a final PE image with imports and sections.
+
+---
+
+## 2) The pipeline (the full “spine” with what each stage *means*)
+
+### 2.1 Pipeline diagram (conceptual truth)
+
+```
 syntax.rane
-   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+  ↓  (CIAMs: interpret surface intent)
 Lexer / Tokenizer
-   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+  ↓  (CIAMs: contextual token shaping)
 Parser
-   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
-AST
-   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
-Resolver
-   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+  ↓  (CIAMs: grammar rewriting + sugar)
+AST (SMD-shape or AST proper)
+  ↓  (CIAMs: structural normalization)
+Resolver (names, scopes, capabilities, ownership facts)
+  ↓  (CIAMs: semantic insertion + inference)
 Typed CIL (Typed Common Intermediary Language)
-   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+  ↓  (CIAMs: typed rewrites + lowering decisions)
 OSW (Optimized Structure Web)
-   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+  ↓  (CIAMs: optimization + backend shaping)
 Frame Planner
-   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+  ↓  (CIAMs: ABI, stack, shadow, alignment)
 Codegen (.exe x64 PE) / NASM Emitters
+```
 
+### 2.2 What each stage outputs (not vibes—actual deliverables)
 
+#### Stage A — `syntax.rane` (surface source)
 
+* Indentation-based blocks
+* Minimal punctuation
+* Human-meaningful symbols (`>`, `->`, `and`, `or`, `not`)
+* “Instruction prose” flavor
 
-* Reliable Adaptive Natural Efficient (RANE Proccessing Language)
-Create a programmjng language  
+Output: raw source text + file identity + module identity.
 
---processing ideas to instructions to execution-- P.I.E. 
+#### Stage B — Lexer / Tokenizer
 
-Paradigm: performance-oriented systems whisperer
+* Turns characters into tokens: identifiers, keywords, literals, operators, indentation/dedent markers.
+* “Static yet flexible spacing”: spacing is mostly ignorable except where it separates tokens and where indentation forms blocks.
 
-This language specializes bare-metal communication and manipulation
+Output: token stream with spans (`line, col, length`) and structural markers (INDENT/DEDENT/NEWLINE).
 
-This language has a standard library built for creation
+#### Stage C — Parser
 
-Philosophy: No smoke and mirrors; direct and precise
+* Converts tokens into a structured tree.
+* Establishes block structure and precedence.
+* Creates distinct node kinds: `ProcDecl`, `StructDecl`, `IfStmt`, `ForStmt`, `MatchStmt`, etc.
 
-Syntax is heavily maxhine natural; yet extremely human-friendly
+Output: AST / SMD-style tree (source-shaped structure).
 
-The grammar is ultimately cohesive and the most human-oriented ever
+#### Stage D — AST / SMD normalization
 
-This is a professional production majorscale multi-industry language
+* Unifies equivalent surface forms.
+* Example: `match`, `switch`, `decide` remain distinct nodes *or* normalize into a shared “Decision” super-node with a tag that preserves intent.
 
-The semantics are basic and beginner welcoming
+Output: canonical structural tree (same meaning, fewer syntax variants).
 
-The structure is heavily prose-focussed
+#### Stage E — Resolver
 
-Programs are written in instructional directions that match 1:1 machine operable Inherently
+This is where “meaning” locks in:
 
-Symbols mean what they mean in human language like > means greater than, -> means into/or then etc
+* Name binding (`math::square`)
+* Module scope and namespace structure
+* Type name resolution (`Maybe<i64>`)
+* Capability constraints (`requires network_io`)
+* Contract attachment
+* Ownership/borrowing legality (if enforced early)
+* Macro/template expansion boundaries (what is expanded now vs later)
 
-Static yet flexible spacing
+Output: resolved tree + symbol tables + type references + capability environment + diagnostics.
 
-Indentation is informal
+#### Stage F — Typed CIL
 
-String typed and determanistic control flows
+Typed CIL is the “machine-ready truth”:
 
-Structs are independent 
+* Every expression has a type.
+* Every call has an effect/capability signature.
+* Every memory operation becomes explicit.
+* “String typed” becomes concrete: string is a known runtime ABI type.
+* Control flow becomes explicit blocks with conditions and branches.
 
-Programs are basically a network of seperate command-nodes
+Output: typed IR in a stable, inspectable format.
 
-Punctuation is minimal 
+#### Stage G — OSW (Optimized Structure Web)
 
-Memory is layered-stacks (under the hokd) with representative virtual registers (user-facing) 
+OSW is not “a list of passes.” It’s a **web**:
 
-Dynamic AOT compilation
+* Nodes = transformations + invariants
+* Edges = allowed ordering + prerequisites
+* CIAMs can inject patterns here to guide optimization and lowering.
 
-Completely runtime-free by default
+Output: optimized IR + metadata for backend selection.
 
-Intresic instruction set by design
+#### Stage H — Frame Planner
 
-Automatic/self adapting dictionary
+This stage computes:
 
-Explicit states
+* stack frame size
+* local slots
+* spill slots
+* alignment padding
+* Windows x64 shadow space requirements
+* call-site alignment rules
+* debug/unwind metadata hooks (if you support it)
 
-Immutable classes
+Output: frame map + per-proc layout + calling convention compliance plan.
 
-Mutable objects
+#### Stage I — Codegen / Emitter
 
-Safety is baked into syntax
+* Instruction selection (IR → x64 instruction forms)
+* Register assignment (or uses a deterministic “virtual register → physical register” plan)
+* Emits:
 
-Security is compile time centric
+  * machine code bytes
+  * PE sections
+  * import tables and thunks
+  * relocation info if needed
+  * entrypoint and symbol metadata
 
-Speed is runtime proficient
+Output: `.exe` (and optionally `.asm` / `.obj`).
 
-Consistency-dominant concurrency
+---
 
-Processes replace routines
+## 3) CIAMs (Contextual Inference Abstraction Macros) — the “everywhere” mechanism
 
-Parallelism is controlled by syncronized commands withing writing the program
+### 3.1 What a CIAM is
 
-Logic is coherent-connection throughout the program to the execution
+A **CIAM** is a deterministic, auditable rewrite unit that can run at any stage.
+It is not “a macro system.” It is a **multi-stage semantic transformer**.
 
-Pattern matching is ingrained in compiled
+A CIAM has:
 
-Optimizations are baked into how the code is written
+* **Match pattern** (syntax shape / AST shape / typed IR shape / CFG shape)
+* **Context requirements** (types known? symbols resolved? capabilities present?)
+* **Rewrite output** (new structure)
+* **Invariants** (what must remain true)
+* **Audit footprint** (hashable transformation record)
 
-Intuititve build system
+### 3.2 The core promise
 
-Package manager is baked into sequential render and export logic
+CIAMs make RANE feel “natural” without becoming “mystical.”
 
-Tooling is dynamic
+They enable:
 
-Wrapping, binding, glue, are deterministic 
+* minimal punctuation while still compiling to precise machine intent
+* “prose-like” constructs (`with`, `defer`, `choose`, `start at node`)
+* context-aware rewrites (type-directed expansions)
+* optimization hints baked into writing style
 
-Imports and exports are user-defined
+### 3.3 CIAM lifecycle (fully explicit)
 
-Compression is baked into how users wdite their code for each program individually
+1. **Register** CIAM with stages + required invariants.
+2. **Build Context Object** at boundary:
 
-User-defined sorting
+   * stage id
+   * symbol snapshot
+   * type environment
+   * capability environment
+   * target ABI info
+   * ownership/linearity state
+3. **Match** deterministically (ordered rule set).
+4. **Rewrite** structure:
 
-Strong static types are runtime-frieny
+   * insert nodes
+   * normalize blocks
+   * lower sugar
+   * attach metadata
+5. **Validate invariants** (type/capability/ownership/control-flow rules).
+6. **Commit** output as canonical representation.
+7. **Log** the transformation record:
 
-Primatives are very machine-friendly
+   * CIAM name
+   * input hash
+   * output hash
+   * invariant results
 
-Strings and booleans are very execution-friendly
+### 3.4 Examples of CIAM behavior (concrete)
 
-Rucursion is matb-based
+#### Example A: `with open path as f: ... end`
 
-Polynomial-fibonacci Ciphers replace obfuscation *
+CIAM rewrite:
 
-**********
+* transforms into a `try/finally` structure with guaranteed close
+* ensures `file_io` capability is required
+* enforces that `f` does not escape scope (or inserts safe boxing if allowed)
 
-This is the syntax for RANE:
+#### Example B: `defer close f`
 
-import rane_rt_print
-import rane_rt_fs
-import rane_rt_net
-import rane_rt_time
-import rane_rt_threads
-import rane_rt_channels
-import rane_rt_alloc
-import rane_rt_crypto
+CIAM rewrite:
 
-module demo_root
+* pushes a cleanup action onto a scope cleanup stack
+* later lowered into finally blocks in Typed CIL or OSW
 
-namespace math:
-  export inline proc square x i64 -> i64:
-    return x * x
-  end
+#### Example C: `choose max a b`
 
-  export inline proc abs_i64 x i64 -> i64:
-    if x < 0:
-      return -x
-    else:
-      return x
-    end
-  end
+CIAM rewrite:
 
-  private proc hidden -> i32:
-    return 0
-  end
+* replaces with a call to a known intrinsic or runtime function
+* may inline for primitives
+* ensures determinism and explicit evaluation order
+
+---
+
+## 4) RANE’s philosophy statements — explained line by line (no handwaving)
+
+### 4.1 “No smoke and mirrors; direct and precise”
+
+Meaning:
+
+* No hidden allocations.
+* No implicit conversions that change meaning silently.
+* No unspecified evaluation order.
+* Effects are gated explicitly (capabilities).
+* If the compiler does something clever, it can explain it via logs/IR dumps.
+
+### 4.2 “Syntax is heavily machine natural; yet extremely human-friendly”
+
+Meaning:
+
+* Human-friendly: prose-like blocks, minimal punctuation, readable flow.
+* Machine-natural: every construct maps to a finite set of canonical IR forms.
+* You don’t write “compiler-bait”; you write “instruction truth.”
+
+### 4.3 “Grammar is cohesive and human-oriented”
+
+Meaning:
+
+* Similar concepts have similar forms:
+
+  * `proc name args -> ret: ... end`
+  * `struct Name: fields end`
+  * `namespace name: ... end`
+* The language avoids chaotic punctuation dialects.
+
+### 4.4 “Semantics are basic and beginner welcoming”
+
+Meaning:
+
+* No “gotcha” defaults.
+* Direct mental model:
+
+  * variables have types
+  * expressions evaluate left-to-right
+  * control flow is explicit
+  * side effects require capability
+* Advanced power exists, but it doesn’t infect the beginner model.
+
+### 4.5 “Programs are a network of separate command-nodes”
+
+Meaning:
+
+* RANE supports both:
+
+  * structured procedural programming (`proc`)
+  * explicit node graphs (`node start: ... end`)
+* Internally, everything can be represented as:
+
+  * basic blocks + edges
+  * or nodes + control transitions
+* This supports:
+
+  * deterministic compilation
+  * explicit scheduling
+  * clear lowering into jump logic
+
+### 4.6 “Memory is layered-stacks with representative virtual registers”
+
+Meaning:
+
+* User-facing model can feel “register-like” (explicit, stable values).
+* Implementation uses:
+
+  * stack slots for locals/temps
+  * virtual registers in IR
+  * physical registers assigned late
+* You get predictable performance while keeping readability.
+
+### 4.7 “Dynamic AOT compilation”
+
+Meaning:
+
+* “Ahead-of-time” output is real native code.
+* “Dynamic” means the pipeline can:
+
+  * choose different lowering strategies based on context
+  * apply CIAMs and optimizations based on target and code patterns
+* But determinism is preserved: the same inputs + same configuration → same output.
+
+### 4.8 “Completely runtime-free by default”
+
+Meaning:
+
+* If you don’t import runtime services, you don’t pay for them.
+* You can compile a “freestanding-ish” subset:
+
+  * no heap
+  * no IO
+  * no threads
+* When you *do* want services, you explicitly import and require capabilities.
+
+### 4.9 “Intrinsic instruction set by design”
+
+Meaning:
+RANE includes builtin operations that are not “library functions,” but **language-level primitives**, like:
+
+* `addr`, `load`, `store`
+* `read32`, `write32` on `mmio region`
+* `allocate`, `free`, `borrow`, `mutate`
+* `trap`, `halt`
+* inline `asm`
+
+Each intrinsic has:
+
+* typing rules
+* capability rules
+* lowering rules into IR + final instructions
+
+### 4.10 “Explicit states”
+
+Meaning:
+
+* No invisible state machines.
+* If async exists, its lowering is inspectable (state structs + switch dispatch).
+* If ownership exists, it is modeled explicitly (owned vs borrowed).
+
+### 4.11 “Immutable classes; mutable objects”
+
+Interpretation in RANE terms:
+
+* **Types** (struct definitions, enum definitions) are immutable definitions.
+* **Values** can be mutable if declared/operated on with explicit mutation forms (`mutate`, `set`, `add ... by`).
+* Mutation is never accidental; it is written.
+
+### 4.12 “Safety baked into syntax; security compile-time centric”
+
+Meaning:
+
+* Security is not “runtime checks everywhere.”
+* It’s:
+
+  * capability gating
+  * contracts
+  * deterministic behavior
+  * ownership/borrowing rules (where enabled)
+  * compile-time denial of forbidden effects
+
+---
+
+## 5) Core language surface (what your syntax demonstrates)
+
+I’m going to treat your provided syntax as **canonical supported forms** and explain each category:
+
+---
+
+## 6) Modules, imports, namespaces (the program’s global topology)
+
+### 6.1 `import rane_rt_print`
+
+* Declares a dependency on a runtime/service module.
+* Introduces symbols into import table and/or resolver environment.
+* May be used for:
+
+  * direct calls (e.g., `print`)
+  * capability association (e.g., `file_io` maps to `rane_rt_fs`)
+
+**Compilation meaning:**
+Imports become:
+
+* resolver-visible module references
+* and later: PE imports (LoadLibrary/GetProcAddress or static import table depending on design)
+
+### 6.2 `module demo_root`
+
+* Establishes module identity.
+* Determines:
+
+  * symbol prefixes / name mangling domain
+  * export namespace
+  * compilation unit boundaries
+
+### 6.3 `namespace math: ... end`
+
+* Logical grouping.
+* Influences symbol paths: `math::square`.
+
+---
+
+## 7) Procedures (procs), visibility, qualifiers
+
+### 7.1 Proc form
+
+Surface:
+
+```rane
+export inline proc square x i64 -> i64:
+  return x * x
 end
+```
 
-import math::square
-import math::abs_i64
+Meaning breakdown:
 
-public proc exported_fn -> i32:
-  return 7
+* `export`: visible outside the module (emitted in symbol table / export list)
+* `inline`: optimization directive, but also a semantic hint (“safe to duplicate body”)
+* `proc`: function/procedure declaration
+* `square`: name
+* `x i64`: parameter list, each param has a name and type
+* `-> i64`: return type
+* block body
+* `end`: closes proc
+
+Typed CIL form:
+
+```rane
+export inline proc square(x: i64) -> i64 { return x * x; }
+```
+
+### 7.2 Visibility keywords
+
+* `public`: callable by other modules (subject to export policy)
+* `protected`: callable within module + friend scopes (depending on your rules)
+* `private`: callable only inside namespace/module scope
+* `admin`: elevated scope (often for privileged capabilities or internal runtime glue)
+
+**Compiler meaning:**
+Visibility controls:
+
+* symbol table emission
+* linker/export metadata
+* resolver access rules
+* optional LTO boundaries
+
+---
+
+## 8) Types: primitives, aliases, user-defined aggregates
+
+### 8.1 Primitive declarations
+
+You list:
+
+* signed ints: `i8 ... i512`
+* unsigned ints: `u8 ... u512`
+* floats: `f32 f64 f128`
+* `bool void int string`
+
+**Interpretation:**
+These `type` lines can mean either:
+
+1. “declare builtins into the module type environment,” or
+2. “alias builtin types into the current compilation unit,” or
+3. “expose them as part of the language prelude.”
+
+Regardless, by the time Typed CIL exists, these are concrete types with known:
+
+* size
+* alignment
+* ABI behavior
+* allowed operations
+
+### 8.2 `typealias` and `alias`
+
+* `typealias word = u32`: introduces a named alias that preserves type identity rules you define (could be “strong alias”)
+* `alias int32 = i32`: often a “weak alias” (pure synonym)
+
+**Important distinction (recommended):**
+
+* `alias` = synonym (no new type identity)
+* `typealias` = named type wrapper (distinct identity, same representation)
+  This supports safer APIs without runtime cost.
+
+---
+
+## 9) Constants: `const`, `constexpr`, `constinit`, `consteval`
+
+### 9.1 `const PI f64 = ...`
+
+* compile-time constant value
+* usable wherever constant expressions are allowed
+* must be immutable
+
+### 9.2 `constexpr E f64 = ...`
+
+* stronger guarantee: must be evaluable at compile-time
+* can be used in compile-time contexts (array sizes, enum values, etc.)
+
+### 9.3 `constinit ZERO i64 = 0`
+
+* guarantees initialization occurs at program init, not lazily
+* used for static storage objects that must be initialized deterministically
+
+### 9.4 `consteval proc const_fn -> i64: return 42 end`
+
+* proc executed at compile time whenever referenced
+* cannot depend on runtime data
+* output is embedded into IR as a literal
+
+---
+
+## 10) Structs, enums, variants, unions — data modeling explained fully
+
+### 10.1 Attributes: `@derive Eq Ord Debug`
+
+* compile-time generated implementations
+* implemented via CIAM or derive system
+
+Meaning:
+
+* `Eq`: generate equality comparison
+* `Ord`: generate ordering
+* `Debug`: generate debug formatting
+
+**Lowering meaning:**
+
+* Derive generates:
+
+  * procs or methods in Typed CIL/OSW
+  * or runtime-vtable-like hooks if you ever choose that (but your “runtime-free by default” suggests avoid vtables)
+
+### 10.2 `struct Person: name string age u8 end`
+
+* field list
+* deterministic layout (C-like)
+* no hidden padding decisions: layout is defined and inspectable
+
+### 10.3 `enum Flags u8: ... end`
+
+* enum with explicit representation type (`u8`)
+* supports bitwise composition:
+
+  * `ReadWrite = Read | Write`
+
+**Lowering meaning:**
+
+* stored as the repr type (`u8`)
+* operations are integer ops
+
+### 10.4 `variant Maybe<T>: Some T None end`
+
+* sum type with cases
+* generic parameter `T`
+
+**Lowering meaning (typical):**
+
+* tag + payload union
+* tag repr chosen (e.g., `u8` if few cases)
+* payload contains `T` for `Some`, nothing for `None`
+
+### 10.5 `union IntOrFloat: i i32 f f32 end`
+
+* overlapping storage; manual interpretation
+* unsafe potential, but still type-known
+
+**Lowering meaning:**
+
+* size = max(field sizes), align = max(field alignments)
+* access is explicit
+
+---
+
+## 11) Low-level hardware features: `mmio region`, `addr`, `load`, `store`
+
+### 11.1 `mmio region REG from 4096 size 256`
+
+Defines a named memory-mapped IO region:
+
+* base address: 4096
+* size: 256 bytes
+* the symbol `REG` becomes a region handle
+
+### 11.2 `read32 REG 0 into x`
+
+* volatile load from REG base + offset 0
+* ensures proper width and ordering
+
+### 11.3 `write32 REG 4 123`
+
+* volatile store into offset 4
+
+### 11.4 `addr/load/store` forms
+
+Your examples:
+
+* `let p0 = addr 4096 4 8 16`
+* `load u32 addr 4096 0 1 0`
+* `store u32 addr 4096 0 1 8 7`
+
+These read like an address-construction DSL:
+
+* base
+* scale
+* index
+* displacement
+* value
+
+**Lowering meaning:**
+
+* compile-time folding if constants
+* emits LEA + MOV patterns
+* enforces alignment / access width rules
+
+---
+
+## 12) Capabilities: the compile-time security model
+
+### 12.1 Capability declarations
+
+You define:
+
+* `capability heap_alloc`
+* `capability file_io`
+* `capability network_io`
+* `capability dynamic_eval`
+* `capability syscalls`
+* `capability threads`
+* `capability channels`
+* `capability crypto`
+
+### 12.2 Capability use: `requires`
+
+Example:
+
+```rane
+async proc async_fetch -> i64 requires network_io:
+  ...
 end
+```
 
-type i8
-type i16
-type i32
-type i64
-type i128
-type i512
+Meaning:
 
-type u8
-type u16
-type u32
-type u64
-type u128
-type u512
+* This proc *cannot compile* unless it is explicitly marked as requiring `network_io`.
+* A caller must also be in a capability context that includes `network_io` (or be marked similarly).
+* This enforces effect safety at compile time.
 
-type f32
-type f64
-type f128
+### 12.3 Why this matters
 
-type bool
-type void
-type int
-type string
+This is your “security is compile time centric” line made real:
 
-typealias word = u32
-alias int32 = i32
+* You can’t accidentally do IO.
+* You can’t “accidentally” spawn threads.
+* You can’t hide `eval` inside some helper; it contaminates the call chain unless explicitly permitted.
 
-const PI f64 = 3.141592653589793
-constexpr E f64 = 2.718281828459045
-constinit ZERO i64 = 0
+---
 
-consteval proc const_fn -> i64:
-  return 42
-end
+## 13) Contracts and assertions: correctness rules as part of code
 
-@derive Eq Ord Debug
-struct Person:
-  name string
-  age u8
-end
+### 13.1 Contracts
 
-enum Flags u8:
-  None = 0
-  Read = 1
-  Write = 2
-  Exec = 4
-  ReadWrite = Read | Write
-end
-
-enum Color i32:
-  Red = 0
-  Green = 1
-  Blue = 2
-end
-
-variant Maybe<T>:
-  Some T
-  None
-end
-
-union IntOrFloat:
-  i i32
-  f f32
-end
-
-struct Header:
-  magic u32
-  version u16
-  flags u16
-  size u64
-end
-
-struct Point:
-  x i32
-  y i32
-end
-
-struct Vec3:
-  x i64
-  y i64
-  z i64
-end
-
-mmio region REG from 4096 size 256
-
-capability heap_alloc
-capability file_io
-capability network_io
-capability dynamic_eval
-capability syscalls
-capability threads
-capability channels
-capability crypto
-
-admin proc admin_fn -> i32:
-  return 0
-end
-
-protected proc prot_fn -> i32:
-  return 1
-end
-
-public proc pub_fn -> i32:
-  return 2
-end
-
-private proc priv_fn -> i32:
-  return 3
-end
-
+```rane
 contract positive x i64:
   ensures x > 0
 end
+```
 
-proc assert_example x i64 -> i64:
-  assert x != 0 "x must be non-zero"
-  return x
-end
+Meaning:
 
+* a named logical guarantee
+* attachable to values/procs
+* can be enforced:
+
+  * purely compile-time (when provable)
+  * optionally runtime (if you choose), but your model leans compile-time-first
+
+### 13.2 Assertions
+
+```rane
+assert x != 0 "x must be non-zero"
+```
+
+Meaning:
+
+* explicit condition with message
+* lowering choices:
+
+  * compile-time eliminate if provable
+  * otherwise emit a conditional trap / error path
+
+---
+
+## 14) Macros and templates: two different powers
+
+### 14.1 Macro (text/structure rewrite)
+
+```rane
 macro SQUARE x = x * x
+```
 
+Meaning:
+
+* expands before typing (or during early typing, depending on design)
+* should preserve determinism
+* must not introduce hidden effects unless explicitly allowed
+
+### 14.2 Template / Generics (type-driven)
+
+```rane
 template T
 proc generic_id x T -> T:
   return x
 end
+```
 
+Meaning:
+
+* monomorphization: `generic_id<i64>` becomes a concrete proc
+* type constraints can be added later (if you want)
+* expands into Typed CIL specialized copies
+
+---
+
+## 15) Concurrency primitives: async/await, threads, mutex, channels
+
+### 15.1 `async` + `await`
+
+* `async proc` returns a value but may suspend.
+* `await` pauses until result is ready.
+
+**Lowering meaning:**
+
+* state machine:
+
+  * a state struct (locals + state index)
+  * a resume function
+  * a dispatch switch on state index
+* determinism:
+
+  * scheduling must be explicit or stable per your `pragma "scheduling" "fair"`
+
+### 15.2 `dedicate proc` + `spawn/join`
+
+Your intent:
+
+* `dedicate` signals “this proc is meant to be run as a worker”
+* `spawn` creates a thread task handle
+* `join` waits and retrieves result
+
+### 15.3 `mutex` and `lock`
+
+```rane
 mutex m1
-channel<int> ch
-
-async proc async_fetch -> i64 requires network_io:
-  let v i64 = await rane_rt_net.fetch_i64 "https://example"
-  return v
+lock m1:
+  print "locked"
 end
+```
 
-dedicate proc spawn_worker iter i64 -> i64 requires threads:
-  let total i64 = 0
-  for let i i64 = 0; i < iter; i = i + 1:
-    total = total + i
-  end
-  return total
+Meaning:
+
+* `lock` is a structured region
+* must lower into:
+
+  * lock acquire
+  * try/finally unlock (so unlock is guaranteed)
+
+### 15.4 `channel<int> ch` + `send/recv`
+
+* typed message passing
+* blocking semantics defined by runtime
+* compile-time ensures message types match
+
+---
+
+## 16) Resource management: `with`, `defer`, ownership ops
+
+### 16.1 `with open path as f: ...`
+
+* structured resource acquisition
+* deterministic cleanup
+
+### 16.2 `defer close f`
+
+* schedules cleanup at scope end
+* CIAM lowers into finally blocks
+
+### 16.3 Ownership operations
+
+```rane
+let p = allocate i32 4
+mutate p[0] to 10
+let q = borrow p
+free p
+```
+
+Meaning:
+
+* `allocate` returns owned memory (requires `heap_alloc`)
+* `borrow` returns a non-owning reference
+* `free` consumes ownership
+
+**Compile-time safety options (depending on how strict you want):**
+
+* forbid `free p` while `q` is live
+* or require `q` be dropped/ended before free
+* or allow but mark as unsafe (you didn’t include `unsafe`, so best is to enforce structurally)
+
+---
+
+## 17) Control flow: if/else, loops, match/switch/decide, goto/label
+
+### 17.1 Deterministic evaluation
+
+* Expressions evaluate left-to-right.
+* Conditions are explicit booleans.
+* No “truthy” ambiguity unless you define it (you show `if (f & Flags.Write):`, so you likely define nonzero → true only for `bool` or provide an explicit rule for flags).
+
+### 17.2 Loops
+
+* `while` and `for` forms are canonical
+* `#pragma unroll 4` is a lowering directive
+
+### 17.3 Pattern matching
+
+`match` supports destructuring variants:
+
+```rane
+match m1:
+  case Some x: print x
+  case None:   print "none"
 end
+```
 
-proc file_read_example path string -> string requires file_io:
-  with open path as f:
-    let s string = f.read
-    return s
-  end
+Lowering:
+
+* inspect tag
+* jump to case blocks
+* bind payload if present
+
+### 17.4 `switch` and `decide`
+
+You keep distinct keywords because they can carry different semantic intent:
+
+* `switch` = standard branching
+* `decide` = “decision table” semantics, can map to jump tables more aggressively
+* both can lower into the same backend structures but preserve author intent for optimization.
+
+### 17.5 Labels / goto / trap / halt
+
+These are explicit low-level control tools:
+
+* `label L_true:`
+* `goto (cond) -> L_true L_false`
+* `trap` raises an unrecoverable fault (optionally with code)
+* `halt` terminates execution path
+
+**Compiler meaning:**
+
+* these map directly into basic blocks and jumps
+* `trap` can map to `int3`, `ud2`, or a runtime abort stub
+* `halt` can map to an exit syscall or a controlled termination path
+
+---
+
+## 18) Inline `asm:` blocks
+
+```rane
+asm:
+  mov rax 1
+  add rax 2
+  mov out rax
 end
+```
 
-proc defer_example path string -> i32 requires file_io:
-  let f = open path
-  defer close f
-  write f "hello"
-  return 0
-end
+Meaning:
 
-proc asm_example -> i64 requires syscalls:
-  let out i64 = 0
-  asm:
-    mov rax 1
-    add rax 2
-    mov out rax
-  end
-  return out
-end
+* allows direct target instructions
+* must be constrained to preserve:
 
-proc try_example -> i32:
-  try:
-    throw 100
-  catch e:
-    print e
-  finally:
-    print "done"
-  end
-  return 0
-end
+  * clobber rules
+  * type safety around inputs/outputs
+  * calling convention constraints
 
+A strict design:
+
+* only allows named output binds (`mov out rax`)
+* requires capability `syscalls` or `unsafe_asm` (you used `syscalls`)
+
+---
+
+## 19) Exceptions: `try/catch/finally`, `throw`
+
+RANE includes:
+
+* recoverable flow (`throw`, `catch`)
+* deterministic cleanup (`finally`)
+* structural lowering into explicit control flow (not mystical stack unwinding unless you implement real SEH)
+
+**Possible lowering strategies:**
+
+1. **Zero-cost SEH-style** (harder)
+2. **Explicit error-return + handler blocks** (simpler, deterministic, auditable)
+3. **Trap-based** for “no exceptions mode”
+
+Given your “runtime-free by default,” the simplest consistent approach is:
+
+* lower `throw` into a structured error return or a jump to a handler block
+* `try/catch` becomes a decision region
+* `finally` always becomes guaranteed cleanup blocks
+
+---
+
+## 20) `eval` and dynamic features
+
+```rane
 proc eval_example x string -> i64 requires dynamic_eval:
   let res i64 = eval "10 + " + x
-  print res
-  return res
+  ...
 end
+```
 
-proc add5 a i64 b i64 c i64 d i64 e i64 -> i64:
-  return a + b + c + d + e
-end
+Meaning:
 
-proc identity<T> x T -> T:
-  return x
-end
+* dynamic evaluation is not “for free”
+* it is capability-gated (`dynamic_eval`)
+* the compiler can:
 
-proc choose_demo a i64 b i64 -> i64:
-  let mx i64 = choose max a b
-  let mn i64 = choose min a b
-  return mx + mn
-end
+  * forbid it in production builds
+  * sandbox it
+  * or require explicit trust policies
 
-proc collection_demo -> i64 requires heap_alloc:
-  let arr [5]i64 = [1 2 3 4 5]
-  let vec = vector 1 2 3
-  let table = map "a" -> 1 "b" -> 2
+This is exactly how you keep “professional language” + “security compile-time centric.”
 
-  let tup = (1 "hi" true)
-  let (x0 i64 x1 string x2 bool) = tup
+---
 
-  print arr[0]
-  print vec.len
-  print table.get "a"
-  print x1
+## 21) Operators: your full operator set, with rules
 
-  return x0 + table.get "b"
-end
+You demonstrate:
 
-linear proc lin_inc x i64 -> i64:
-  return x + 1
-end
+* unary: `-`, `not`, `!`, `~`
+* arithmetic: `+ - * / %`
+* bitwise: `& | ^ xor`
+* shifts: `shl shr sar << >>`
+* comparisons: `< <= > >= == !=`
+* assignment: `=`
+* logic: `and or && ||`
+* ternary: `? :`
 
-nonlinear proc nlin_mul x i64 -> i64:
-  return x * 2
-end
+A coherent rule system (the “symbols mean what they mean” promise):
 
-proc ownership_example -> i32 requires heap_alloc:
-  let p = allocate i32 4
-  mutate p[0] to 10
-  let q = borrow p
-  print q[0]
-  free p
-  return 0
-end
+* `>` is strictly numeric/ordered comparison (not “generic weirdness”)
+* `->` is “into/then/transition” and used in:
 
-proc match_example val i64 -> i32:
-  match val:
-    case 0: print "zero"
-    case 1: print "one"
-    default: print "other"
-  end
-  return 0
-end
+  * return types
+  * mapping pairs (`"a" -> 1`)
+  * goto conditional targets (`goto cond -> L_true L_false`)
+* `and/or/not` are readable aliases to boolean logic, while `&&/||/!` exist for familiarity.
+* `xor`, `shl`, `shr`, `sar` provide word-meaning clarity.
 
-proc switch_example x i64 -> i32:
-  switch x:
-    case 0: print "zero"
-    case 1: print "one"
-    default: print "other"
-  end
-  return 0
-end
+---
 
-proc decide_example x i64 -> i32:
-  decide x:
-    case 1: print "one"
-    case 2: print "two"
-    default: print "other"
-  end
-  return 0
-end
+## 22) Symbol literals: `#rane_rt_print`, `#REG`
 
-proc loop_example -> i64:
-  let i i64 = 0
-  while i < 10:
-    print i
-    i = i + 1
-  end
-  return i
-end
+```rane
+let sym0 = #rane_rt_print
+let sym1 = #REG
+```
 
-proc for_example -> i64:
-  for let j i64 = 0; j < 5; j = j + 1:
-    print j
-  end
-  return 0
-end
+Meaning:
 
-proc loop_unroll_example -> i64:
-  #pragma unroll 4
-  for let i i64 = 0; i < 16; i = i + 1:
-    print i
-  end
-  return 0
-end
+* compile-time symbol handles
+* can represent:
 
-proc tail_recursive n i64 acc i64 -> i64:
-  if n == 0:
-    return acc
-  end
-  return tail_recursive n - 1 acc + n
-end
+  * imported module symbol IDs
+  * mmio region IDs
+  * reflection handles
+  * debug identifiers
 
-#pragma profile "hot"
-inline proc hot_add a i64 b i64 -> i64:
-  return a + b
-end
+Lowering:
 
-pragma "optimize" "speed"
-pragma "lto" "on"
-pragma "scheduling" "fair"
-define BUILD_ID 0xDEADBEEF
+* into immediate IDs (integers) or pointers (if you build a symbol table blob)
 
-proc mmio_demo -> u32:
-  let x u32 = 0
-  read32 REG 0 into x
-  write32 REG 4 123
-  return x
-end
+---
 
-proc addr_load_store_demo -> i64:
-  let p0 = addr 4096 4 8 16
-  let y0 u32 = load u32 addr 4096 0 1 0
-  let z0 u32 = store u32 addr 4096 0 1 8 7
-  print y0
-  print z0
-  print p0
-  return (y0 as i64) + (z0 as i64)
-end
+## 23) Node-graph programming: `module demo_struct`, `node start: ...`
 
-proc operator_coverage -> i64:
-  let a i64 = 1
-  let b i64 = 2
+This is a major identity feature: **programs as command-node networks**.
 
-  let i_dec i64 = 123
-  let i_underscore i64 = 1_000_000
-  let i_hex i64 = 0xCAFE_BABE
-  let i_bin i64 = 0b1010_0101
+Example:
 
-  let t bool = true
-  let f bool = false
-
-  let s0 string = "hello"
-  let s1 string = "with \\n escape"
-  let n = null
-
-  let u0 i64 = -i_dec
-  let u1 bool = not f
-  let u2 bool = !f
-  let u3 i64 = ~i_dec
-
-  let ar0 = a + b
-  let ar1 = a - b
-  let ar2 = a * b
-  let ar3 = 100 / b
-  let ar4 = 100 % b
-
-  let bw0 = a & b
-  let bw1 = a | b
-  let bw2 = a ^ b
-  let bw3 = a xor b
-
-  let sh0 = i_dec shl 2
-  let sh1 = i_dec shr 1
-  let sh2 = i_dec sar 1
-  let sh3 = i_dec << 1
-  let sh4 = i_dec >> 1
-
-  let c0 = a < b
-  let c1 = a <= b
-  let c2 = a > b
-  let c3 = a >= b
-  let c4 = a == b
-  let c5 = a != b
-
-  let c6 = a = b
-
-  let l0 = c0 and c5
-  let l1 = c0 or c4
-  let l2 = c0 && c5
-  let l3 = c0 || c4
-
-  let te0 = c0 ? a : b
-  let te1 = (a < b) ? (a + 1) : (b + 1)
-
-  print s0
-  print s1
-  print t
-  print f
-  print n
-
-  return ar0 + ar1 + ar2 + ar3 + ar4 +
-         bw0 + bw1 + bw2 + bw3 +
-         sh0 + sh1 + sh2 + sh3 + sh4 +
-         u0 + u3 + te0 + te1 +
-         i_underscore + i_hex + i_bin
-end
-
-proc symbol_demo -> i32:
-  let sym0 = #rane_rt_print
-  let sym1 = #REG
-  print sym0
-  print sym1
-  return 0
-end
-
-module demo_struct
-
+```rane
 node start:
   set h Header to Header:
     magic 0x52414E45
-    version 1
-    flags 0
-    size 4096
+    ...
   end
-
-  set m u32 to h.magic
-  set h.version to 2
-  add h.size by 512
-
   say "ok"
   go to node end_node
 end
-
-node end_node:
-  say "goodbye"
-  halt
-end
-
-start at node start
-
-proc main -> int requires heap_alloc threads channels file_io network_io syscalls dynamic_eval crypto:
-  let hdr Header = Header:
-    magic 0x52414E45
-    version 1
-    flags 0
-    size 4096
-  end
-
-  let p Point = Point: x 7 y 9 end
-  let v Vec3  = Vec3: x 1 y 2 z 3 end
-
-  print hdr.magic
-  print p.x
-  print v.z
-
-  let f Flags = Flags.Read | Flags.Write
-  if (f & Flags.Write):
-    print "writable"
-  end
-
-  let c Color = Color.Green
-  print c
-
-  let m1 Maybe<i64> = Some 123
-  let m2 Maybe<i64> = None
-
-  match m1:
-    case Some x: print x
-    case None:   print "none"
-  end
-
-  match m2:
-    case Some x: print x
-    case None:   print "none"
-  end
-
-  let u IntOrFloat
-  set u.i to 10
-  print u.i
-  set u.f to 3.14
-  print u.f
-
-  let sum i64 = add5 1 2 3 4 5
-  let idv i64 = identity<i64> sum
-  print sum
-  print idv
-
-  print choose_demo 9 2
-
-  print mmio_demo
-  print addr_load_store_demo
-
-  print collection_demo
-  print ownership_example
-
-  print loop_example
-  print for_example
-  print loop_unroll_example
-  print tail_recursive 10 0
-
-  print match_example 1
-  print switch_example 2
-  print decide_example 3
-
-  let ax i64 = assert_example 5
-  print ax
-
-  let text string = file_read_example "file.txt"
-  print text
-  print defer_example "out.txt"
-
-  let netv i64 = await async_fetch
-  print netv
-
-  let th1 = spawn spawn_worker 100000
-  let th2 = spawn spawn_worker 200000
-
-  send ch 11
-  send ch 22
-  let r1 i64 = recv ch
-  let r2 i64 = recv ch
-
-  let a1 i64 = join th1
-  let a2 i64 = join th2
-
-  print r1 + r2 + a1 + a2
-
-  lock m1:
-    print "locked"
-  end
-
-  print asm_example
-  print try_example
-  print eval_example "3"
-
-  print operator_coverage
-  print symbol_demo
-
-  goto (1 == 1) -> L_true L_false
-
-label L_false:
-  trap 7
-  goto 1 -> L_end L_end
-
-label L_true:
-  trap
-
-label L_end:
-  halt
-
-  return 0
-end
-*****
-
-Typed Common Intermediary Language (Typed CIL):
-
-import rane_rt_print;
-import rane_rt_fs;
-import rane_rt_net;
-import rane_rt_time;
-import rane_rt_threads;
-import rane_rt_channels;
-import rane_rt_alloc;
-import rane_rt_crypto;
-
-module demo_root;
-
-namespace math {
-  export inline proc square(x: i64) -> i64 { return x * x; }
-
-  export inline proc abs_i64(x: i64) -> i64 {
-    if (x < 0) { return -x; }
-    else { return x; }
-  }
-
-  private proc hidden() -> i32 { return 0; }
-}
-
-import math::square;
-import math::abs_i64;
-
-public proc exported_fn() -> i32 { return 7; }
-
-type i8;  type i16;  type i32;  type i64;  type i128;  type i512;
-type u8;  type u16;  type u32;  type u64;  type u128;  type u512;
-type f32; type f64;  type f128;
-type bool; type void; type int; type string;
-
-typealias word = u32;
-alias int32 = i32;
-
-const PI: f64 = 3.141592653589793;
-constexpr E: f64 = 2.718281828459045;
-constinit ZERO: i64 = 0;
-
-consteval proc const_fn() -> i64 { return 42; }
-
-@derive(Eq, Ord, Debug)
-struct Person:
-  name: string
-  age: u8
-end
-
-enum Flags : u8 {
-  None = 0,
-  Read = 1,
-  Write = 2,
-  Exec = 4,
-  ReadWrite = Read | Write
-}
-
-enum Color : i32 {
-  Red = 0,
-  Green = 1,
-  Blue = 2
-}
-
-variant Maybe<T> = Some(T) | None
-
-union IntOrFloat {
-  i: i32
-  f: f32
-}
-
-struct Header:
-  magic: u32
-  version: u16
-  flags: u16
-  size: u64
-end
-
-struct Point:
-  x: i32
-  y: i32
-end
-
-struct Vec3:
-  x: i64
-  y: i64
-  z: i64
-end
-
-mmio region REG from 4096 size 256;
-
-capability(heap_alloc);
-capability(file_io);
-capability(network_io);
-capability(dynamic_eval);
-capability(syscalls);
-capability(threads);
-capability(channels);
-capability(crypto);
-
-admin proc admin_fn() -> i32 { return 0; }
-protected proc prot_fn() -> i32 { return 1; }
-public proc pub_fn() -> i32 { return 2; }
-private proc priv_fn() -> i32 { return 3; }
-
-contract positive(x: i64) { ensures(x > 0); }
-
-proc assert_example(x: i64) -> i64 {
-  assert(x != 0, "x must be non-zero");
-  return x;
-}
-
-macro SQUARE(x) = (x) * (x)
-
-template <T>
-proc generic_id(x: T) -> T { return x; }
-
-mutex m1;
-channel<int> ch;
-
-async proc async_fetch() -> i64 requires(network_io) {
-  let v: i64 = await rane_rt_net.fetch_i64("https://example");
-  return v;
-}
-
-dedicate proc spawn_worker(iter: i64) -> i64 requires(threads) {
-  let total: i64 = 0;
-  for let i: i64 = 0; i < iter; i = i + 1 {
-    total = total + i;
-  }
-  return total;
-}
-
-proc file_read_example(path: string) -> string requires(file_io) {
-  let f = open(path);
-  try {
-    let s: string = f.read();
-    return s;
-  } finally {
-    close(f);
-  }
-}
-
-proc defer_example(path: string) -> i32 requires(file_io) {
-  let f = open(path);
-  try {
-    write(f, "hello");
-    return 0;
-  } finally {
-    close(f);
-  }
-}
-
-proc asm_example() -> i64 requires(syscalls) {
-  let out: i64 = 0;
-  asm {
-    mov rax, 1
-    add rax, 2
-    mov out, rax
-  }
-  return out;
-}
-
-proc try_example() -> i32 {
-  try {
-    throw 100;
-  } catch (e) {
-    print(e);
-  } finally {
-    print("done");
-  }
-  return 0;
-}
-
-proc eval_example(x: string) -> i64 requires(dynamic_eval) {
-  let res: i64 = eval("10 + " + x);
-  print(res);
-  return res;
-}
-
-proc add5(a: i64, b: i64, c: i64, d: i64, e: i64) -> i64 {
-  return a + b + c + d + e;
-}
-
-proc identity<T>(x: T) -> T { return x; }
-
-proc choose_demo(a: i64, b: i64) -> i64 {
-  let mx: i64 = rane_rt_math.max_i64(a, b);
-  let mn: i64 = rane_rt_math.min_i64(a, b);
-  return mx + mn;
-}
-
-proc collection_demo() -> i64 requires(heap_alloc) {
-  let arr: [5]i64 = [1, 2, 3, 4, 5];
-  let vec = vector(1, 2, 3);
-  let table = map("a" -> 1, "b" -> 2);
-
-  let tup = (1, "hi", true);
-  let (x0: i64, x1: string, x2: bool) = tup;
-
-  print(arr[0]);
-  print(vec.len());
-  print(table.get("a"));
-  print(x1);
-
-  return x0 + table.get("b");
-}
-
-linear proc lin_inc(x: i64) -> i64 { return x + 1; }
-nonlinear proc nlin_mul(x: i64) -> i64 { return x * 2; }
-
-proc ownership_example() -> i32 requires(heap_alloc) {
-  let p = allocate(i32, 4);
-  mutate p[0] to 10;
-  let q = borrow p;
-  print(q[0]);
-  free p;
-  return 0;
-}
-
-proc match_example(val: i64) -> i32 {
-  switch val {
-    case 0: print("zero");
-    case 1: print("one");
-    default: print("other");
-  }
-  return 0;
-}
-
-proc switch_example(x: i64) -> i32 {
-  switch x {
-    case 0: print("zero");
-    case 1: print("one");
-    default: print("other");
-  }
-  return 0;
-}
-
-proc decide_example(x: i64) -> i32 {
-  decide x {
-    case 1: print("one");
-    case 2: print("two");
-    default: print("other");
-  }
-  return 0;
-}
-
-proc loop_example() -> i64 {
-  let i: i64 = 0;
-  while i < 10 {
-    print(i);
-    i = i + 1;
-  }
-  return i;
-}
-
-proc for_example() -> i64 {
-  for let j: i64 = 0; j < 5; j = j + 1 {
-    print(j);
-  }
-  return 0;
-}
-
-proc loop_unroll_example() -> i64 {
-  #pragma unroll(4)
-  for let i: i64 = 0; i < 16; i = i + 1 {
-    print(i);
-  }
-  return 0;
-}
-
-proc tail_recursive(n: i64, acc: i64) -> i64 {
-  if n == 0 { return acc; }
-  return tail_recursive(n - 1, acc + n);
-}
-
-#pragma profile("hot")
-inline proc hot_add(a: i64, b: i64) -> i64 { return a + b; }
-
-pragma("optimize", "speed");
-pragma("lto", "on");
-pragma("scheduling", "fair");
-define BUILD_ID 0xDEADBEEF
-
-proc mmio_demo() -> u32 {
-  let x: u32 = 0;
-  read32 REG, 0 into x;
-  write32 REG, 4, 123;
-  return x;
-}
-
-proc addr_load_store_demo() -> i64 {
-  let p0 = addr(4096, 4, 8, 16);
-  let y0: u32 = load(u32, addr(4096, 0, 1, 0));
-  let z0: u32 = store(u32, addr(4096, 0, 1, 8), 7);
-  print(y0);
-  print(z0);
-  print(p0);
-  return (y0 as i64) + (z0 as i64);
-}
-
-proc operator_coverage() -> i64 {
-  let a: i64 = 1;
-  let b: i64 = 2;
-
-  let i_dec: i64 = 123;
-  let i_underscore: i64 = 1_000_000;
-  let i_hex: i64 = 0xCAFE_BABE;
-  let i_bin: i64 = 0b1010_0101;
-
-  let t: bool = true;
-  let f: bool = false;
-
-  let s0: string = "hello";
-  let s1: string = "with \\n escape";
-  let n = null;
-
-  let u0: i64 = -i_dec;
-  let u1: bool = not f;
-  let u2: bool = !f;
-  let u3: i64 = ~i_dec;
-
-  let ar0 = a + b;
-  let ar1 = a - b;
-  let ar2 = a * b;
-  let ar3 = 100 / b;
-  let ar4 = 100 % b;
-
-  let bw0 = a & b;
-  let bw1 = a | b;
-  let bw2 = a ^ b;
-  let bw3 = a xor b;
-
-  let sh0 = i_dec shl 2;
-  let sh1 = i_dec shr 1;
-  let sh2 = i_dec sar 1;
-  let sh3 = i_dec << 1;
-  let sh4 = i_dec >> 1;
-
-  let c0 = a < b;
-  let c1 = a <= b;
-  let c2 = a > b;
-  let c3 = a >= b;
-  let c4 = a == b;
-  let c5 = a != b;
-
-  let c6 = a = b;
-
-  let l0 = c0 and c5;
-  let l1 = c0 or c4;
-  let l2 = c0 && c5;
-  let l3 = c0 || c4;
-
-  let te0 = c0 ? a : b;
-  let te1 = (a < b) ? (a + 1) : (b + 1);
-
-  print(s0);
-  print(s1);
-  print(t);
-  print(f);
-  print(n);
-
-  return ar0 + ar1 + ar2 + ar3 + ar4 + bw0 + bw1 + bw2 + bw3
-       + sh0 + sh1 + sh2 + sh3 + sh4 + u0 + u3 + te0 + te1
-       + i_underscore + i_hex + i_bin;
-}
-
-proc symbol_demo() -> i32 {
-  let sym0 = #rane_rt_print;
-  let sym1 = #REG;
-  print(sym0);
-  print(sym1);
-  return 0;
-}
-
-module demo_struct;
-
-node start:
-  set h: Header to Header{
-    magic: 0x52414E45
-    version: 1
-    flags: 0
-    size: 4096
-  }
-  set m: u32 to h.magic
-  set h.version to 2
-  add h.size by 512
-  say "ok"
-  go to node end_node
-end
-
-node end_node:
-  say "goodbye"
-  halt
-end
-
-start at node start
-
-proc main() -> int requires(heap_alloc, threads, channels, file_io, network_io, syscalls, dynamic_eval, crypto) {
-
-  let hdr: Header = Header{
-    magic: 0x52414E45
-    version: 1
-    flags: 0
-    size: 4096
-  };
-
-  let p: Point = Point{ x: 7, y: 9 };
-  let v: Vec3 = Vec3{ x: 1, y: 2, z: 3 };
-
-  print(hdr.magic);
-  print(p.x);
-  print(v.z);
-
-  let f: Flags = Flags.Read | Flags.Write;
-  if (f & Flags.Write) { print("writable"); }
-
-  let c: Color = Color.Green;
-  print(c);
-
-  let m1: Maybe<i64> = Some(123);
-  let m2: Maybe<i64> = None;
-
-  match m1 {
-    case Some(x): print(x);
-    case None: print("none");
-  }
-  match m2 {
-    case Some(x): print(x);
-    case None: print("none");
-  }
-
-  let u: IntOrFloat;
-  u.i = 10;
-  print(u.i);
-  u.f = 3.14;
-  print(u.f);
-
-  let sum: i64 = add5(1, 2, 3, 4, 5);
-  let idv: i64 = identity<i64>(sum);
-  print(sum);
-  print(idv);
-
-  print(choose_demo(9, 2));
-
-  print(mmio_demo());
-  print(addr_load_store_demo());
-
-  print(collection_demo());
-  print(ownership_example());
-
-  print(loop_example());
-  print(for_example());
-  print(loop_unroll_example());
-  print(tail_recursive(10, 0));
-
-  print(match_example(1));
-  print(switch_example(2));
-  print(decide_example(3));
-
-  let ax: i64 = assert_example(5);
-  print(ax);
-
-  let text: string = file_read_example("file.txt");
-  print(text);
-  print(defer_example("out.txt"));
-
-  let netv: i64 = await async_fetch();
-  print(netv);
-
-  let th1 = rane_rt_threads.spawn_proc(spawn_worker, 100000);
-  let th2 = rane_rt_threads.spawn_proc(spawn_worker, 200000);
-
-  send(ch, 11);
-  send(ch, 22);
-  let r1: i64 = recv(ch);
-  let r2: i64 = recv(ch);
-
-  let a1: i64 = rane_rt_threads.join_i64(th1);
-  let a2: i64 = rane_rt_threads.join_i64(th2);
-
-  print(r1 + r2 + a1 + a2);
-
-  rane_rt_threads.mutex_lock(m1);
-  try {
-    print("locked");
-  } finally {
-    rane_rt_threads.mutex_unlock(m1);
-  }
-
-  print(asm_example());
-  print(try_example());
-  print(eval_example("3"));
-
-  print(operator_coverage());
-  print(symbol_demo());
-
-  goto (1 == 1) -> L_true, L_false;
-
-label L_false;
-  trap 7;
-  goto 1 -> L_end, L_end;
-
-label L_true;
-  trap;
-
-label L_end;
-  halt;
-
-  return 0;
-}
-*****
-
-from there it gets converted to Windows x86-64 PE executable machine code (.exe)
-
-
-flowchart LR
-    A[source] --> B[Syntax Map Diagram (SMD)]
-    B --> C[Typed Common Intermediary Language (Typed CIL)]
-    C --> D[Optimized Structure Web]
-    D --> E[Codegen (.exe x64 PE)]
-    F[CIAMs (Contextual Inference Abstraction Macros)] -.-> B
-    F -.-> C
-    F -.-> D
-    F -.-> E
-
-*****
-
-I’m building a whole civilization here, not just a compiler. Here is the spine. 
-
----
-
-## 1. Formal language specification (RANE)
-
-### 1.1 Lexical structure
-- **Characters:** Unicode source, ASCII subset required for core syntax.
-- **Tokens:**  
-  **Identifiers:** `[A-Za-z_][A-Za-z0-9_]*`  
-  **Literals:** integers (dec/hex/bin with `_`), floats, strings with escapes, `true`, `false`, `null`.  
-  **Keywords:** `module`, `namespace`, `proc`, `struct`, `enum`, `variant`, `union`, `type`, `typealias`, `alias`, `const`, `constexpr`, `constinit`, `contract`, `requires`, `async`, `dedicate`, `linear`, `nonlinear`, `match`, `switch`, `decide`, `while`, `for`, `if`, `else`, `return`, `try`, `catch`, `finally`, `throw`, `with`, `defer`, `mutex`, `channel`, `mmio`, `capability`, `admin`, `protected`, `public`, `private`, `goto`, `label`, `trap`, `halt`, `start`, `node`, `say`.
-  **Operators:** `+ - * / % & | ^ xor shl shr sar << >> < <= > >= == != = && || and or ? : ! ~ not`.
-
-### 1.2 Declarations
-- **Modules/namespaces:** hierarchical, single `module` per file; `namespace` for logical grouping.
-- **Types:** primitive (`i8`…`u512`, `f32`…`f128`, `bool`, `void`, `int`, `string`), user types (`struct`, `enum`, `variant`, `union`), aliases (`typealias`, `alias`).
-- **Functions:**  
-  `proc name [generic] params -> ret [qualifiers] [requires capabilities]: body end`  
-  Qualifiers: `inline`, `async`, `dedicate`, `linear`, `nonlinear`, visibility (`public`, `protected`, `private`, `admin`).
-- **Capabilities:** `capability name` defines a capability symbol; `requires` on procs expresses capability preconditions.
-- **Contracts:** `contract name(params): ensures predicate end` attachable to functions/values.
-
-### 1.3 Statements and expressions
-- **Statements:** `let`, `return`, `if/else`, `while`, `for`, `match`, `switch`, `decide`, `try/catch/finally`, `throw`, `with`, `defer`, `asm`, `goto`, `label`, `trap`, `halt`, `lock`.
-- **Expressions:** arithmetic, logical, ternary, function calls, method-like calls (`vec.len`), indexing, tuple construction/destructuring, variant construction (`Some 123`), struct literals (`Point: x 7 y 9 end`), casts (`as`).
-- **Ownership:** `allocate`, `free`, `borrow`, `mutate` are primitive operations with defined aliasing rules.
-
-### 1.4 Semantics (high-level)
-- **Determinism:** no hidden global state; all side effects explicit via capabilities and runtime calls.
-- **Evaluation order:** left-to-right for expressions; no unspecified order.
-- **Error model:** `trap` for unrecoverable errors; `throw`/`try` for recoverable ones.
-- **Concurrency:** `async` + `await`, `threads`, `channels`, `mutex` with well-defined blocking semantics.
-
----
-
-## 2. SMD node taxonomy
-
-Think: “fully desugared syntax tree, still source-shaped.”
-
-### 2.1 Top-level nodes
-- **Module:** `Module(name, imports, decls)`
-- **Import:** `Import(path, alias?, symbols?)`
-- **Namespace:** `Namespace(name, decls)`
-- **CapabilityDecl, TypeDecl, AliasDecl, ConstDecl, ContractDecl`
-
-### 2.2 Type-level nodes
-- **StructDecl:** `Struct(name, attrs, fields, derives)`
-- **EnumDecl:** `Enum(name, reprType?, variants)`
-- **VariantDecl:** `Variant(name, typeParams, cases)`
-- **UnionDecl:** `Union(name, fields)`
-- **TypeExpr:** `NamedType`, `GenericType(name, args)`, `ArrayType(elem, size)`, `TupleType(elems)`, `FunctionType(params, ret)`
-
-### 2.3 Function-level nodes
-- **ProcDecl:**  
-  `Proc(name, vis, attrs, qualifiers, typeParams, params, retType, requiresCaps, body)`
-- **Param:** `Param(name, type, mode)` (by value, borrow, etc.)
-- **Block:** `Block(stmts)`
-
-### 2.4 Statement nodes
-- **LetStmt:** `Let(name, type?, initExpr?)`
-- **AssignStmt:** `Assign(target, expr)`
-- **ReturnStmt:** `Return(expr?)`
-- **IfStmt:** `If(cond, thenBlock, elseBlock?)`
-- **WhileStmt, ForStmt**
-- **MatchStmt:** `Match(expr, cases, default?)`
-- **SwitchStmt, DecideStmt** (distinct node kinds, lowered similarly) 
-- **TryStmt:** `Try(tryBlock, catchVar?, catchBlock?, finallyBlock?)`
-- **WithStmt:** `With(resourceExpr, name, body)` (desugars to try/finally)
-- **DeferStmt:** `Defer(expr)` (desugars to finally)
-- **AsmStmt:** `Asm(instrs)`
-- **GotoStmt, LabelStmt, TrapStmt, HaltStmt**
-- **LockStmt:** `Lock(mutexExpr, body)`
-
-### 2.5 Expression nodes
-- **LiteralExpr, VarExpr, FieldExpr, IndexExpr, CallExpr, TupleExpr, TupleDestructureExpr**
-- **UnaryExpr, BinaryExpr, TernaryExpr**
-- **CastExpr:** `Cast(expr, type)`
-- **StructInitExpr:** `StructInit(type, fields)`
-- **VariantInitExpr:** `VariantInit(variant, payload?)`
-- **IntrinsicExpr:** `AllocateExpr`, `FreeExpr`, `BorrowExpr`, `MutateExpr`, `AddrExpr`, `LoadExpr`, `StoreExpr`, `MMIOReadExpr`, `MMIOWriteExpr`
-- **AwaitExpr, SpawnExpr, SendExpr, RecvExpr**
-
-Macros and templates are *not* SMD nodes—they’re expanded before or during SMD construction.
-
----
-
-## 3. Typed CIL type system
-
-### 3.1 Kinds and types
-- **Kinds:** `*` (value types), `* -> *` (unary generics), etc.
-- **Types:**
-  - **Primitives:** `iN`, `uN`, `fN`, `bool`, `void`, `string`.
-  - **Structs:** `Struct(name, fields, layoutInfo)`.
-  - **Enums:** `Enum(name, reprType, variants)`.
-  - **Variants:** lowered to tagged unions: `(tag: reprType, payload: union{...})`.
-  - **Unions:** `Union(name, fields, maxSize, maxAlign)`.
-  - **Arrays:** `[N]T`.
-  - **Tuples:** `(T1, T2, ...)`.
-  - **Pointers/Refs:** `&T` (borrow), `*T` (raw).
-  - **Function types:** `(T1, ..., Tn) -> Tr` with effect/capability set `E`.
-  - **Channels, Mutexes, Threads:** opaque runtime types with parameterization where needed (e.g. `Channel<T>`).
-
-### 3.2 Capabilities and effects
-- **Effect set:** attached to function type: `fn(T1..Tn) -> Tr [E]`.
-- **Capabilities:** elements of `E` (e.g. `heap_alloc`, `file_io`).
-- **Typing rule:** call `f` only if caller’s effect set ⊇ callee’s effect set.
-
-### 3.3 Ownership and linearity
-- **Linear types:** certain resources (e.g. `Owned<T>`) must be used exactly once; enforced at CIL level.
-- **Borrowing:** `&T` non-owning; lifetime constraints enforced structurally (no use-after-free in CIL).
-
-### 3.4 Well-typedness
-- **Progress/preservation:**  
-  - No uninitialized reads.  
-  - No capability-violating calls.  
-  - No type-unsafe casts except via explicit `unsafe` (if you introduce it later).  
-
----
-
-## 4. OSW optimization passes
-
-Think of OSW as a graph of passes over Typed CIL.
-
-### 4.1 Early passes
-- **Constant folding & propagation:** arithmetic, boolean, simple control flow.
-- **Dead code elimination:** unreachable blocks, unused variables.
-- **Inliner:** guided by `inline`, `#pragma profile("hot")`, size heuristics.
-
-### 4.2 Structural passes
-- **Pattern match lowering:** `match`, `switch`, `decide` → decision trees → jump tables/if-chains.
-- **Async lowering:** `async/await` → state machines (struct + dispatch loop).
-- **Defer/with lowering:** `defer`, `with` → explicit `try/finally` blocks.
-- **Tail recursion elimination:** `tail_recursive` → loops where safe.
-
-### 4.3 Memory and ownership passes
-- **Escape analysis:** stack vs heap allocation decisions.
-- **Borrow/alias analysis:** remove redundant borrows, optimize loads/stores.
-- **Linear usage check:** verify linear resources are consumed exactly once.
-
-### 4.4 Low-level passes
-- **MMIO lowering:** `read32/write32` → volatile loads/stores with barriers.
-- **Addr/load/store lowering:** compute concrete addresses, fold constant offsets.
-- **Loop optimizations:** unrolling (`#pragma unroll`), strength reduction, induction variable simplification.
-
-### 4.5 Backend prep
-- **SSA construction (if you choose SSA):** for easier register allocation.
-- **Register allocation:** graph coloring or linear scan.
-- **Instruction selection:** map CIL ops to x86‑64 instructions.
-
----
-
-## 5. Runtime ABI design
-
-### 5.1 Calling convention
-- **Platform:** Windows x86‑64 (MSVC ABI).
-- **Registers:**  
-  - Args: `RCX, RDX, R8, R9` (then stack).  
-  - Return: `RAX` (and `RDX` for large values if needed).  
-  - Caller/callee-saved per ABI.
-- **Stack:** 16-byte aligned at call sites; shadow space honored.
-
-### 5.2 Type layout
-- **Primitives:** follow C ABI sizes/alignments.
-- **Structs:** C-like layout: fields in order, padding for alignment.
-- **Enums/variants:** tag + payload; tag size = reprType; payload union aligned to max field.
-- **Tuples:** treated as anonymous structs.
-- **Generics:** monomorphized at compile time (per type instantiation).
-
-### 5.3 Runtime services
-- **Threads:** `rane_rt_threads.spawn_proc`, `join_*`, `mutex_lock/unlock`.
-- **Channels:** `send`, `recv` with blocking semantics.
-- **Alloc:** `rane_rt_alloc` for heap; all `allocate/free` calls go through it.
-- **IO:** `rane_rt_fs`, `rane_rt_net`, `rane_rt_crypto`, `rane_rt_time` as capability-gated APIs.
-
----
-
-## 6. Compiler architecture diagram (textual)
-
-```text
-[Lexer] -> [Parser] -> [SMD Builder] -> [Macro/Template Expander]
-      -> [Name Resolver] -> [Type Checker] -> [Typed CIL Builder]
-      -> [OSW Optimizer Pipeline]
-      -> [Backend: SSA + RegAlloc + Instruction Selection]
-      -> [PE Emitter (.exe x64)]
 ```
 
-Cross-cutting:
-- **CIAMs (Contextual Inference Abstraction Macros):**
-  - Hook into SMD building (syntactic sugar, context-aware rewrites).
-  - Hook into Typed CIL (type-directed macros, effect inference).
-  - Hook into OSW (optimization hints, profile-guided rewrites).
-  - Hook into Codegen (layout hints, section placement).
+Meaning:
+
+* nodes are explicit basic blocks with named identity
+* `go to node` is a jump
+* `start at node start` defines entrypoint for this module’s node graph
+
+This gives you:
+
+* visualizable CFG
+* deterministic scheduling
+* easy conversion to “structure web” graphs
+* a natural bridge to mission/script logic systems
 
 ---
 
-## 7. Reference manual skeleton
+## 24) Typed CIL — what it is, why it exists, what it must guarantee
 
-1. **Introduction**
-   - Goals, philosophy, determinism, capability model.
-2. **Lexical Structure**
-3. **Types**
-   - Primitives, structs, enums, variants, unions, generics.
-4. **Expressions**
-5. **Statements**
-6. **Functions and Procedures**
-   - Visibility, qualifiers, async, linearity.
-7. **Modules, Namespaces, Imports**
-8. **Capabilities and Effects**
-9. **Memory and Ownership**
-10. **Concurrency**
-    - Threads, async, channels, mutexes.
-11. **Low-Level Features**
-    - MMIO, addr/load/store, inline asm.
-12. **Attributes, Pragmas, Macros, Templates**
-13. **Contracts and Assertions**
-14. **Runtime Library Overview**
-15. **Compilation Pipeline and Tooling**
+### 24.1 Definition
 
-Each section: formal grammar + examples + lowering notes.
+**Typed CIL is the canonical typed IR that is close enough to hardware to compile easily, but structured enough to optimize safely.**
 
----
+### 24.2 Guarantees Typed CIL must provide
 
-## 8. Test suite design
+By the time something is Typed CIL:
 
-### 8.1 Layers
-- **Lexing/parsing tests:** golden files for tokens and SMD trees.
-- **Type system tests:** success/failure cases for generics, variants, ownership, capabilities.
-- **Lowering tests:** SMD → CIL snapshots; CIL → OSW snapshots.
-- **Runtime tests:** threads, channels, IO, MMIO (with mocks).
-- **Optimization tests:** ensure passes preserve semantics; check specific transformations.
-- **ABI tests:** interop with C; call RANE from C and vice versa.
+* Every identifier has a resolved symbol binding.
+* Every expression has a known type.
+* Every call has a known capability/effect signature.
+* Control flow is explicit in blocks.
+* Memory operations are explicit and typed.
+* No ambiguous syntax remains.
 
-### 8.2 Strategy
-- **Doctests:** examples in the reference manual are executable tests.
-- **Property tests:** e.g. `identity<T>` round-trips, `lin_inc` respects linearity.
-- **Fuzzing:** random programs within a safe subset; check determinism and no crashes.
+### 24.3 Why Typed CIL exists (the practical reason)
+
+If you skip a stable typed IR, you end up with:
+
+* scattered lowering logic
+* duplicated rules
+* “optimization spaghetti”
+* fragile codegen
+
+Typed CIL is the “single truth” the rest of the compiler can trust.
 
 ---
 
-## 9. Industrial-production framing
+## 25) OSW — Optimized Structure Web (why it’s a “web” not a “list”)
 
-You can position RANE as:
+### 25.1 Why “web”
 
-- **Deterministic Systems Language:** “What if C, Rust, and Zig were rebuilt around explicit capabilities and analyzable IR?”
-- **Audit-First Compiler Stack:** every stage is inspectable: SMD, Typed CIL, OSW graph, final PE.
-- **Capability-Secured Runtime:** IO, threads, crypto, eval—all gated and statically checked.
-- **IR-Centric Platform:** SMD + Typed CIL + OSW are stable targets for tools, analyzers, and alternative backends.
+Because optimization is not one-dimensional. You have:
 
-Taglines: 
-- **“Deterministic by design, explicit by default.”**
-- **“Every effect is a contract.”**
-- **“From syntax to silicon, all accounted for.”**
+* prerequisites (type facts, alias facts, capability facts)
+* mutual exclusions (can’t inline after some transforms if you want debug fidelity)
+* multiple routes to the same end (jump table vs if-chain)
+* target-driven decisions (size vs speed)
 
-**********
+So OSW is:
 
----
+* transformations as nodes
+* dependencies as edges
+* CIAMs can inject edges (“prefer pattern X if pragma says hot”)
 
-**********
+### 25.2 What OSW *does* to your constructs
 
-Below you’ll find:
-
-1. **A full pipeline diagram** (ASCII + conceptual)
-2. **A CIAM Lifecycle Document** (formal, spec‑style)
-3. **A Whitepaper‑style explanation** (narrative, persuasive, architectural)
-
-Let’s dive in.
-
----
-
-# 🜁 **1. Pipeline Diagram (New CIAM‑Everywhere Architecture)**
-
-## **1.1 High‑Level ASCII Diagram**
-
-```
-┌──────────────────────────┐
-│        syntax.rane        │
-└──────────────┬───────────┘
-               ▼
-        [ CIAM Expansion ]
-               ▼
-┌──────────────────────────┐
-│     Lexer / Tokenizer     │
-└──────────────┬───────────┘
-               ▼
-        [ CIAM Expansion ]
-               ▼
-┌──────────────────────────┐
-│          Parser           │
-└──────────────┬───────────┘
-               ▼
-        [ CIAM Expansion ]
-               ▼
-┌──────────────────────────┐
-│           AST             │
-└──────────────┬───────────┘
-               ▼
-        [ CIAM Expansion ]
-               ▼
-┌──────────────────────────┐
-│         Resolver          │
-└──────────────┬───────────┘
-               ▼
-        [ CIAM Expansion ]
-               ▼
-┌──────────────────────────┐
-│        Typed CIL          │
-└──────────────┬───────────┘
-               ▼
-        [ CIAM Expansion ]
-               ▼
-┌──────────────────────────┐
-│           OSW             │
-│   (Optimized Structure    │
-│           Web)            │
-└──────────────┬───────────┘
-               ▼
-        [ CIAM Expansion ]
-               ▼
-┌──────────────────────────┐
-│       Frame Planner       │
-└──────────────┬───────────┘
-               ▼
-        [ CIAM Expansion ]
-               ▼
-┌──────────────────────────┐
-│   Codegen / NASM Emit     │
-│     (.exe, .obj, .asm)    │
-└──────────────────────────┘
-```
-
-## **1.2 Conceptual Diagram (Layered)**
-
-```
-           ┌──────────────────────────────┐
-           │        Surface Syntax         │
-           └──────────────┬───────────────┘
-                          ▼
-           ┌──────────────────────────────┐
-           │   Structural Interpretation   │
-           └──────────────┬───────────────┘
-                          ▼
-           ┌──────────────────────────────┐
-           │   Semantic Interpretation     │
-           └──────────────┬───────────────┘
-                          ▼
-           ┌──────────────────────────────┐
-           │   Canonical IR Generation    │
-           └──────────────┬───────────────┘
-                          ▼
-           ┌──────────────────────────────┐
-           │     Optimization Graph       │
-           └──────────────┬───────────────┘
-                          ▼
-           ┌──────────────────────────────┐
-           │     Machine Lowering         │
-           └──────────────────────────────┘
-
-At every boundary: CIAMs
-```
+* `match/switch/decide` → decision tree + jump table selection
+* `async/await` → state machine lowering
+* `with/defer/lock` → guaranteed cleanup regions
+* loops → unroll/strength-reduce if permitted
+* addr/load/store → fold constants, choose LEA patterns
+* constant propagation across blocks
+* remove unreachable code created by consteval folding
 
 ---
 
-# 🜂 **2. CIAM Lifecycle Document (Formal Spec)**
+## 26) Frame Planner — the ABI truth layer (Windows x64 specifics)
 
-## **2.1 Overview**
-A **CIAM (Contextual Inference Abstraction Macro)** is a deterministic, capability‑gated transformation unit that can operate at any compiler stage. CIAMs unify syntax expansion, semantic inference, IR rewriting, optimization, and backend shaping into a single conceptual model.
+### 26.1 Windows x64 must-haves
 
-CIAMs are:
+* first 4 integer args in: `RCX, RDX, R8, R9`
+* return in: `RAX`
+* stack must be **16-byte aligned at call sites**
+* caller reserves **32 bytes shadow space** for callee
+* callee-saved registers preserved as required
 
-- **Deterministic**
-- **Stage‑scoped**
-- **Context‑aware**
-- **Capability‑checked**
-- **Purely compile‑time**
-- **Auditable**
+### 26.2 What a frame planner computes
 
----
+For each proc:
 
-## **2.2 CIAM Lifecycle Stages**
+* local slot sizes + offsets
+* temp/spill slot sizes + offsets
+* saved register slots
+* outgoing call arg area (if needed)
+* shadow space
+* alignment padding
+* final frame size
 
-### **Stage 0 — Registration**
-- CIAMs declare:
-  - Stage(s) they operate on  
-  - Required capabilities  
-  - Input pattern  
-  - Output pattern  
-  - Invariants they preserve  
-
-### **Stage 1 — Invocation Context Construction**
-At each pipeline boundary, the compiler constructs a **CIAM Context Object** containing:
-
-- Current stage  
-- AST/IR fragment  
-- Symbol table snapshot  
-- Capability environment  
-- Type environment  
-- Ownership/linearity state  
-- Optimization metadata  
-- Target architecture metadata  
-
-### **Stage 2 — Matching**
-CIAMs match against:
-
-- Syntax patterns  
-- AST node shapes  
-- IR instruction sequences  
-- Capability signatures  
-- Type signatures  
-- Control‑flow patterns  
-
-Matching is deterministic and ordered.
-
-### **Stage 3 — Expansion / Transformation**
-CIAMs may:
-
-- Rewrite syntax  
-- Insert AST nodes  
-- Infer capabilities  
-- Insert borrows/frees  
-- Lower constructs  
-- Rewrite IR blocks  
-- Insert optimization hints  
-- Modify frame layout metadata  
-- Influence codegen lowering  
-
-### **Stage 4 — Validation**
-After expansion:
-
-- Type invariants checked  
-- Capability invariants checked  
-- Linearity invariants checked  
-- Stage‑specific invariants checked  
-- CIAM‑introduced constructs validated  
-
-### **Stage 5 — Commit**
-The transformed structure becomes the new canonical representation for the next stage.
-
-### **Stage 6 — Audit Logging**
-Each CIAM expansion is logged:
-
-- CIAM name  
-- Stage  
-- Input pattern  
-- Output pattern  
-- Invariants preserved  
-- Resulting structure hash  
-
-This enables deterministic builds and reproducible debugging.
+Output is a **map** from IR locals/temps → `[rsp+offset]` (or `[rbp-offset]` if you use frame pointers).
 
 ---
 
-## **2.3 CIAM Safety Rules**
-- CIAMs cannot introduce nondeterminism  
-- CIAMs cannot violate capability boundaries  
-- CIAMs cannot break type or ownership invariants  
-- CIAMs cannot modify global compiler state  
-- CIAMs cannot depend on runtime values  
+## 27) Codegen: from Typed CIL/OSW into x64 machine code / PE
+
+### 27.1 Instruction selection
+
+Map each IR op into a small set of patterns:
+
+* arithmetic ops → `add/sub/imul/idiv`
+* comparisons → `cmp` + `setcc` or branches
+* branches → `jcc/jmp`
+* loads/stores → `mov` with proper widths
+* calls → `call` with ABI setup
+
+### 27.2 Register allocation (deterministic)
+
+RANE emphasizes determinism, so register allocation should be:
+
+* stable given identical input
+* reproducible across machines
+
+You can choose:
+
+* linear scan (deterministic, simpler)
+* graph coloring (more optimal, more complex)
+
+### 27.3 PE emission
+
+The emitter must build:
+
+* DOS header + NT headers
+* `.text` section (code)
+* `.rdata` (constants, strings)
+* `.idata` (imports) or custom resolver blob
+* entrypoint + import resolution strategy
 
 ---
 
-## **2.4 CIAM Stages Summary Table**
+## 28) Tooling and “built for creation”
 
-| Stage | CIAM Role |
-|-------|-----------|
-| syntax.rane | DSL expansion, keyword interpretation |
-| Lexer | semantic tokenization |
-| Parser | grammar rewriting, sugar expansion |
-| AST | structural lowering |
-| Resolver | capability inference, ownership inference |
-| Typed CIL | IR rewriting, safety enforcement |
-| OSW | optimization injection |
-| Frame Planner | ABI shaping, stack layout |
-| Codegen | instruction rewriting, target‑specific lowering |
+### 28.1 Intuitive build system
 
----
+Your philosophy implies:
 
-# 🜃 **3. Whitepaper‑Style Explanation of the Architecture**
+* builds are declarative and deterministic
+* “package manager baked into sequential render and export logic”
+  Meaning:
+* modules declare imports and exports
+* build graph is derived from module dependency graph
+* “render” = compile + link + emit
+* “export” = package artifacts + symbol manifests + CIAM logs
 
-## **3.1 Abstract**
-This document introduces a new compiler architecture for the RANE language in which **Contextual Inference Abstraction Macros (CIAMs)** operate at every stage of the pipeline. This transforms the compiler from a linear translation engine into a **multi‑stage semantic machine** capable of deterministic inference, domain‑specific extensibility, and cross‑stage reasoning.
+### 28.2 Dynamic tooling
 
----
+Because CIAMs operate everywhere, tooling can:
 
-## **3.2 Introduction**
-Traditional compilers treat macros, semantic analysis, optimization, and code generation as isolated phases. RANE rejects this separation. Instead, it introduces CIAMs as a **unified inference substrate** that permeates the entire pipeline.
-
-This architecture enables:
-
-- Deterministic macro expansion  
-- Context‑aware syntax rewriting  
-- Capability‑driven semantic inference  
-- IR‑level transformations  
-- Domain‑specific optimization  
-- ABI‑aware backend shaping  
-
-All within a single conceptual framework.
+* show “what rewrites happened”
+* show IR at every boundary
+* show capability flow (why a call is forbidden)
+* show ownership flow (why borrow is invalid)
+* show frame layout (why alignment changed)
 
 ---
 
-## **3.3 Motivation**
-Modern languages struggle with:
+## 29) “Optimizations baked into how code is written”
 
-- Fragmented macro systems  
-- Ad‑hoc lowering rules  
-- Hard‑coded optimizations  
-- Rigid backend pipelines  
-- Poor domain‑specific extensibility  
+This is not marketing—it means the surface language is shaped so the compiler can reliably recognize patterns.
 
-CIAMs solve this by providing:
+Examples:
 
-- A uniform interface  
-- A deterministic execution model  
-- A capability‑gated safety layer  
-- A multi‑stage inference mechanism  
+* `inline proc hot_add` + `#pragma profile "hot"`:
 
----
+  * encourages inlining and fast-path decisions
+* `decide`:
 
-## **3.4 Architecture Overview**
-The RANE pipeline is divided into nine stages:
+  * signals a jump-table friendly branch set
+* `dedicate proc`:
 
-1. syntax.rane  
-2. Lexer  
-3. Parser  
-4. AST  
-5. Resolver  
-6. Typed CIL  
-7. OSW  
-8. Frame Planner  
-9. Codegen  
+  * signals thread-worker style with fewer captured closures
+* explicit `requires`:
 
-At each boundary, CIAMs are invoked with full contextual information.
-
-This creates a **layered inference stack** where each stage enriches the program with additional structure, semantics, and guarantees.
+  * lets optimizer reason about allowed side effects and reorder safely
 
 ---
 
-## **3.5 CIAMs as a Unified Semantic Fabric**
-CIAMs unify:
+## 30) “Polynomial-fibonacci ciphers replace obfuscation” (explained safely)
 
-- Syntax macros  
-- Semantic inference  
-- IR rewriting  
-- Optimization passes  
-- ABI shaping  
-- Backend lowering  
+Interpreting this as *a design philosophy for optional code transformation*:
 
-into a single deterministic mechanism.
+* Obfuscation is messy and unpredictable.
+* A deterministic cipher-like transformation layer could:
 
-This eliminates the conceptual fragmentation found in:
+  * encode literals or metadata
+  * produce reproducible transformations
+  * be used for watermarking or anti-tamper *in controlled contexts*
 
-- C++ templates  
-- Rust procedural macros  
-- LLVM passes  
-- Swift SILGen  
-- Java annotation processors  
+If used, it must remain:
 
-RANE becomes a **meta‑language** capable of evolving without breaking.
+* opt-in
+* deterministic
+* transparent in build logs
+* not a substitute for real security (capabilities and sandboxing are real security)
 
 ---
 
-## **3.6 Determinism and Auditability**
-Every CIAM expansion is:
+## 31) Putting it all together: what your provided program demonstrates
 
-- Logged  
-- Hashed  
-- Validated  
-- Reproducible  
+Your program is effectively a **total coverage file**:
 
-This enables:
+* imports, modules, namespaces
+* procs of all visibilities
+* primitives and user-defined types
+* constants and compile-time evaluation
+* traits/derives
+* enums, variants, unions
+* mmio and address operations
+* capabilities and requires
+* contracts/assert
+* macros and templates
+* async/await and threads/channels/mutex
+* with/defer
+* inline asm
+* try/catch/finally/throw
+* eval
+* arrays/vectors/maps/tuples
+* linear/nonlinear tags
+* match/switch/decide
+* loops + unroll
+* tail recursion
+* pragmas/defines
+* symbol literals
+* node-graph module + entry node
+* gotos/labels/trap/halt
+* final `main` requiring many capabilities
 
-- Deterministic builds  
-- Reproducible debugging  
-- Formal verification  
-- Capability‑based safety  
+It’s not just code—it’s a *language manifesto as an executable testbed*.
 
 ---
 
-## **3.7 Extensibility**
-Because CIAMs operate at every stage, RANE supports:
+## 32) The “civilization” view: what RANE ultimately becomes
 
-- Domain‑specific syntax  
-- Domain‑specific IR  
-- Domain‑specific optimizations  
-- Domain‑specific ABIs  
-- Domain‑specific codegen patterns  
+RANE is positioned to be:
 
-All without modifying the compiler core.
+1. **A language** (human-friendly but machine-truth)
+2. **A security model** (capabilities as compile-time effects)
+3. **A compiler architecture** (CIAMs across every boundary)
+4. **An IR ecosystem** (Typed CIL + OSW as stable tool targets)
+5. **A production emitter** (real `.exe` output; deterministic builds)
+6. **A creative platform** (node networks, structured prose, creation-first standard library)
 
 ---
 
-## **3.8 Conclusion**
-This architecture positions RANE as a new category of language:
+## 33) The complete mental model in one final “execution story”
 
-> **A deterministic, multi‑stage, inference‑driven meta‑compiler with a unified semantic substrate.**
+You write:
 
-It is not merely a compiler pipeline.  
-It is a **semantic machine**.
+* a set of instructional declarations and command nodes
+
+The compiler:
+
+* tokenizes and parses deterministically
+* applies CIAMs to preserve intent while normalizing structure
+* resolves meaning (names, scopes, types, capabilities, ownership facts)
+* produces Typed CIL (the typed truth)
+* feeds OSW (the optimization web that is still auditable)
+* plans frames (ABI truth, alignment, shadow, slots)
+* emits x64 machine code + PE structure
+
+The result:
+
+* a real Windows x86-64 executable whose behavior is:
+
+  * deterministic
+  * capability-governed
+  * structurally inspectable at every stage
 
 ---
 
