@@ -1,0 +1,405 @@
+// tiny_nasm_emitter.rane
+// RSP-only backend emitter for the RANE→NASM template table.
+// - Picks an Entry by op
+// - Substitutes placeholders: {dst} {imm64} {lbl} {frame_size_aligned} etc
+// - Appends NASM lines into a .text output buffer
+//
+// Design notes (RSP-only default):
+// - RBP is free for GP use; we do NOT establish a frame pointer unless enabled.
+// - Stack frame uses RSP as base. Locals addressed as [rsp+off] AFTER prolog allocation.
+// - Windows x64 ABI: before each call, you must provide 32-byte shadow space and keep RSP 16-byte aligned.
+//   This emitter doesn’t decide those sizes; your lowering/codegen passes them as placeholders.
+
+import rane_rt_print
+import rane_rt_alloc
+
+module rane_codegen
+
+namespace nasm:
+
+  //////////////////////////////////////////////////////////////
+  // 0) Minimal runtime strings/buffers
+  //////////////////////////////////////////////////////////////
+
+  struct Str:
+    ptr u64
+    len u64
+  end
+
+  struct Buf:
+    ptr u64
+    len u64
+    cap u64
+  end
+
+  proc buf_init cap_bytes i64 -> Buf requires heap_alloc:
+    let b Buf
+    b.ptr = (allocate u8 cap_bytes) as u64
+    b.len = 0
+    b.cap = cap_bytes as u64
+    return b
+  end
+
+  proc buf_reserve b Buf* need u64 -> void requires heap_alloc:
+    if b.len + need <= b.cap:
+      return
+    end
+    let new_cap u64 = b.cap
+    while new_cap < b.len + need:
+      new_cap = new_cap * 2
+    end
+    let nptr u64 = (allocate u8 (new_cap as i64)) as u64
+    // copy
+    let i u64 = 0
+    while i < b.len:
+      (nptr + i) as u8* = ((b.ptr + i) as u8*)*
+      i = i + 1
+    end
+    free (b.ptr as u8*)
+    b.ptr = nptr
+    b.cap = new_cap
+  end
+
+  proc buf_push_byte b Buf* x u8 -> void requires heap_alloc:
+    buf_reserve b 1
+    (b.ptr + b.len) as u8* = x
+    b.len = b.len + 1
+  end
+
+  proc buf_push_str b Buf* s Str -> void requires heap_alloc:
+    buf_reserve b s.len
+    let i u64 = 0
+    while i < s.len:
+      (b.ptr + b.len + i) as u8* = ((s.ptr + i) as u8*)*
+      i = i + 1
+    end
+    b.len = b.len + s.len
+  end
+
+  proc buf_push_cstr b Buf* cstr string -> void requires heap_alloc:
+    // assumes your runtime provides cstr.ptr/cstr.len; adapt as needed
+    let s Str
+    s.ptr = #ptr cstr     # NOTE: placeholder: implement string->(ptr,len) in your runtime
+    s.len = #len cstr
+    buf_push_str b s
+  end
+
+  proc buf_push_newline b Buf* -> void requires heap_alloc:
+    buf_push_byte b 10
+  end
+
+  //////////////////////////////////////////////////////////////
+  // 1) Template table entry (compatible with your earlier Entry)
+  //////////////////////////////////////////////////////////////
+
+  enum Kind i32:
+    Prolog
+    Epilog
+    Move
+    Lea
+    Load
+    Store
+    BinOp
+    UnOp
+    Cmp
+    Branch
+    Call
+    Ret
+    Label
+    Trap
+    InlineAsm
+    Comment
+  end
+
+  enum Width i32:
+    W8  = 8
+    W16 = 16
+    W32 = 32
+    W64 = 64
+  end
+
+  struct Entry:
+    op string
+    kind Kind
+    width Width
+    form string
+    nlines u32
+    line0 string
+    line1 string
+    line2 string
+    line3 string
+    line4 string
+    line5 string
+    line6 string
+    line7 string
+  end
+
+  //////////////////////////////////////////////////////////////
+  // 2) Placeholder environment: {name} -> value
+  //////////////////////////////////////////////////////////////
+
+  struct KV:
+    key string
+    val string
+  end
+
+  struct Env:
+    kv KV*
+    count u32
+    cap u32
+  end
+
+  proc env_init cap u32 -> Env requires heap_alloc:
+    let e Env
+    e.kv = allocate KV cap as i64
+    e.count = 0
+    e.cap = cap
+    return e
+  end
+
+  proc env_put e Env* key string val string -> void requires heap_alloc:
+    // overwrite if exists
+    let i u32 = 0
+    while i < e.count:
+      if e.kv[i].key == key:
+        e.kv[i].val = val
+        return
+      end
+      i = i + 1
+    end
+    // grow if needed
+    if e.count == e.cap:
+      let new_cap u32 = e.cap * 2
+      let nkv KV* = allocate KV (new_cap as i64)
+      let j u32 = 0
+      while j < e.count:
+        nkv[j] = e.kv[j]
+        j = j + 1
+      end
+      free e.kv
+      e.kv = nkv
+      e.cap = new_cap
+    end
+    e.kv[e.count].key = key
+    e.kv[e.count].val = val
+    e.count = e.count + 1
+  end
+
+  proc env_get e Env* key string -> string:
+    let i u32 = 0
+    while i < e.count:
+      if e.kv[i].key == key:
+        return e.kv[i].val
+      end
+      i = i + 1
+    end
+    return ""  # empty => unresolved placeholder
+  end
+
+  //////////////////////////////////////////////////////////////
+  // 3) Tiny substitution engine: emits one template line with {vars}
+  //////////////////////////////////////////////////////////////
+
+  proc emit_subst_line out Buf* tmpl string env Env* -> void requires heap_alloc:
+    // Walk the template; copy literal chars; when '{' ... '}' replace via env.
+    let i u64 = 0
+    let n u64 = #len tmpl
+
+    while i < n:
+      let ch u8 = #byte tmpl i
+      if ch != '{':
+        buf_push_byte out ch
+        i = i + 1
+      else:
+        // parse name until '}'
+        i = i + 1
+        let start u64 = i
+        while i < n and (#byte tmpl i) != '}':
+          i = i + 1
+        end
+        let end u64 = i
+        if i < n and (#byte tmpl i) == '}':
+          i = i + 1
+        end
+
+        let name string = #substr tmpl start (end - start)
+        let val string = env_get env name
+
+        if val == "":
+          // if missing, keep the placeholder visible so debugging is easy
+          buf_push_byte out '{'
+          buf_push_cstr out name
+          buf_push_byte out '}'
+        else:
+          buf_push_cstr out val
+        end
+      end
+    end
+
+    buf_push_newline out
+  end
+
+  //////////////////////////////////////////////////////////////
+  // 4) Entry lookup by op (tiny linear scan; fine for small tables)
+  //////////////////////////////////////////////////////////////
+
+  struct Table:
+    entries Entry*
+    count u32
+  end
+
+  proc find_entry t Table* op string -> Entry*:
+    let i u32 = 0
+    while i < t.count:
+      if t.entries[i].op == op:
+        return &t.entries[i]
+      end
+      i = i + 1
+    end
+    return null
+  end
+
+  //////////////////////////////////////////////////////////////
+  // 5) Emit an Entry (all its lines) into .text buffer
+  //////////////////////////////////////////////////////////////
+
+  proc entry_line e Entry* idx u32 -> string:
+    if idx == 0: return e.line0 end
+    if idx == 1: return e.line1 end
+    if idx == 2: return e.line2 end
+    if idx == 3: return e.line3 end
+    if idx == 4: return e.line4 end
+    if idx == 5: return e.line5 end
+    if idx == 6: return e.line6 end
+    return e.line7
+  end
+
+  proc emit_op out Buf* t Table* op string env Env* -> void requires heap_alloc:
+    let e Entry* = find_entry t op
+    if e == null:
+      buf_push_cstr out "; ERROR: unknown op "
+      buf_push_cstr out op
+      buf_push_newline out
+      return
+    end
+
+    let i u32 = 0
+    while i < e.nlines:
+      let ln string = entry_line e i
+      if ln != "":
+        emit_subst_line out ln env
+      end
+      i = i + 1
+    end
+  end
+
+  //////////////////////////////////////////////////////////////
+  // 6) RSP-only prolog/epilog templates (frame pointer OFF)
+  //////////////////////////////////////////////////////////////
+  //
+  // Placeholders expected:
+  // - {frame_size_aligned} : total local+temp bytes, already 16-aligned
+  // - {save_nonvol} / {restore_nonvol} : optional lines you can inject as comments or extra ops
+  //
+  // Windows x64 CALL discipline:
+  // - Ensure at each CALL site: sub rsp, shadow_and_align; call; add rsp, shadow_and_align
+  //   where shadow_and_align is typically 0x20 plus any extra to keep alignment.
+
+  const ENTRY_PROLOG Entry = Entry:
+    op "fn.prolog.rsp"
+    kind Kind.Prolog
+    width Width.W64
+    form "frame_size_aligned"
+    nlines 3
+    line0 "sub rsp, {frame_size_aligned}"
+    line1 "; (rsp-only) rbp free for GP use"
+    line2 ""
+    line3 "" line4 "" line5 "" line6 "" line7 ""
+  end
+
+  const ENTRY_EPILOG Entry = Entry:
+    op "fn.epilog.rsp"
+    kind Kind.Epilog
+    width Width.W64
+    form "frame_size_aligned"
+    nlines 2
+    line0 "add rsp, {frame_size_aligned}"
+    line1 "ret"
+    line2 "" line3 "" line4 "" line5 "" line6 "" line7 ""
+  end
+
+  //////////////////////////////////////////////////////////////
+  // 7) Optional frame pointer prolog/epilog (debug/interop)
+  //////////////////////////////////////////////////////////////
+
+  const ENTRY_PROLOG_RBP Entry = Entry:
+    op "fn.prolog.rbp"
+    kind Kind.Prolog
+    width Width.W64
+    form "frame_size_aligned"
+    nlines 4
+    line0 "push rbp"
+    line1 "mov rbp, rsp"
+    line2 "sub rsp, {frame_size_aligned}"
+    line3 "; (rbp frame) locals at [rbp - off], spills stable for debugging"
+    line4 "" line5 "" line6 "" line7 ""
+  end
+
+  const ENTRY_EPILOG_RBP Entry = Entry:
+    op "fn.epilog.rbp"
+    kind Kind.Epilog
+    width Width.W64
+    form "frame_size_aligned"
+    nlines 4
+    line0 "add rsp, {frame_size_aligned}"
+    line1 "pop rbp"
+    line2 "ret"
+    line3 ""
+    line4 "" line5 "" line6 "" line7 ""
+  end
+
+  //////////////////////////////////////////////////////////////
+  // 8) Example: minimal table + usage
+  //////////////////////////////////////////////////////////////
+
+  proc demo_emit -> void requires heap_alloc:
+    // Build tiny table (extend with your big TABLE entries)
+    let entries [4]Entry = [ENTRY_PROLOG ENTRY_EPILOG ENTRY_PROLOG_RBP ENTRY_EPILOG_RBP]
+    let tab Table
+    tab.entries = &entries[0]
+    tab.count = 4
+
+    let out Buf = buf_init 4096
+    let env Env = env_init 16
+
+    // Choose rsp-only frame size 0x60 (already aligned)
+    env_put &env "frame_size_aligned" "0x60"
+
+    buf_push_cstr &out "section .text"
+    buf_push_newline &out
+    buf_push_cstr &out "global main"
+    buf_push_newline &out
+    buf_push_cstr &out "main:"
+    buf_push_newline &out
+
+    emit_op &out &tab "fn.prolog.rsp" &env
+
+    // Example user-provided regalloc placeholders
+    env_put &env "dst" "rax"
+    env_put &env "imm64" "42"
+    // Pretend we have an i64.const entry in the big table:
+    // emit_op &out &BIGTAB "i64.const" &env
+
+    emit_op &out &tab "fn.epilog.rsp" &env
+
+    // Print result (wire to your runtime print that accepts raw bytes if available)
+    // placeholder: print expects string; you’ll likely have a print_bytes in rane_rt_print.
+    print "----- NASM OUTPUT (demo) -----"
+    print (out.ptr as string)  # placeholder: replace with print_bytes(out.ptr, out.len)
+
+    // cleanup
+    free (out.ptr as u8*)
+    free env.kv
+  end
+
+end
