@@ -1,0 +1,364 @@
+// rane_nasm_emit.rane
+// Tiny NASM emitter that consumes rane_nasm_table.rane TABLE entries.
+//
+// Requirements satisfied:
+// - picks an Entry by op
+// - substitutes placeholders ({dst}, {imm64}, {lbl}…)
+// - writes NASM lines into .text blocks
+// - regalloc provides concrete operand strings: "rax", "r10", "[rsp+32]", etc.
+// - backend is RSP-only by default; RBP is free unless you enable frame pointer.
+//
+// Notes:
+// - This emitter is intentionally tiny and dumb: it does no correctness checks beyond "missing op".
+// - Placeholders that are not found remain visible (keeps "{name}") for easy debugging.
+// - Hook it to your real codegen by calling emit_op() per Typed-CIL op.
+
+import rane_rt_print
+import rane_rt_alloc
+
+import rane_codegen_table::rane_nasm::TABLE
+
+module rane_nasm_emit
+
+namespace nasm_emit:
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 0) Minimal buffer (text output)
+  ///////////////////////////////////////////////////////////////////////////
+
+  struct Buf:
+    ptr u64
+    len u64
+    cap u64
+  end
+
+  proc buf_init cap_bytes i64 -> Buf requires heap_alloc:
+    let b Buf
+    b.ptr = (allocate u8 cap_bytes) as u64
+    b.len = 0
+    b.cap = cap_bytes as u64
+    return b
+  end
+
+  proc buf_free b Buf* -> void requires heap_alloc:
+    if b.ptr != 0:
+      free (b.ptr as u8*)
+      b.ptr = 0
+      b.len = 0
+      b.cap = 0
+    end
+  end
+
+  proc buf_reserve b Buf* need u64 -> void requires heap_alloc:
+    if b.len + need <= b.cap:
+      return
+    end
+    let new_cap u64 = b.cap
+    if new_cap == 0: new_cap = 256 end
+    while new_cap < b.len + need:
+      new_cap = new_cap * 2
+    end
+
+    let nptr u64 = (allocate u8 (new_cap as i64)) as u64
+
+    let i u64 = 0
+    while i < b.len:
+      (nptr + i) as u8* = ((b.ptr + i) as u8*)*
+      i = i + 1
+    end
+
+    free (b.ptr as u8*)
+    b.ptr = nptr
+    b.cap = new_cap
+  end
+
+  proc buf_push_byte b Buf* x u8 -> void requires heap_alloc:
+    buf_reserve b 1
+    (b.ptr + b.len) as u8* = x
+    b.len = b.len + 1
+  end
+
+  proc buf_push_cstr b Buf* s string -> void requires heap_alloc:
+    // runtime-dependent; assuming #len/#byte are available as intrinsics in your toolchain
+    let n u64 = #len s
+    buf_reserve b n
+    let i u64 = 0
+    while i < n:
+      buf_push_byte b (#byte s i)
+      i = i + 1
+    end
+  end
+
+  proc buf_nl b Buf* -> void requires heap_alloc:
+    buf_push_byte b 10
+  end
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 1) Placeholder environment: {name} -> value
+  ///////////////////////////////////////////////////////////////////////////
+
+  struct KV:
+    key string
+    val string
+  end
+
+  struct Env:
+    kv KV*
+    count u32
+    cap u32
+  end
+
+  proc env_init cap u32 -> Env requires heap_alloc:
+    let e Env
+    e.kv = allocate KV (cap as i64)
+    e.count = 0
+    e.cap = cap
+    return e
+  end
+
+  proc env_free e Env* -> void requires heap_alloc:
+    if e.kv != null:
+      free e.kv
+      e.kv = null
+      e.count = 0
+      e.cap = 0
+    end
+  end
+
+  proc env_put e Env* key string val string -> void requires heap_alloc:
+    let i u32 = 0
+    while i < e.count:
+      if e.kv[i].key == key:
+        e.kv[i].val = val
+        return
+      end
+      i = i + 1
+    end
+
+    if e.count == e.cap:
+      let new_cap u32 = e.cap * 2
+      if new_cap == 0: new_cap = 16 end
+      let nkv KV* = allocate KV (new_cap as i64)
+
+      let j u32 = 0
+      while j < e.count:
+        nkv[j] = e.kv[j]
+        j = j + 1
+      end
+
+      free e.kv
+      e.kv = nkv
+      e.cap = new_cap
+    end
+
+    e.kv[e.count].key = key
+    e.kv[e.count].val = val
+    e.count = e.count + 1
+  end
+
+  proc env_get e Env* key string -> string:
+    let i u32 = 0
+    while i < e.count:
+      if e.kv[i].key == key:
+        return e.kv[i].val
+      end
+      i = i + 1
+    end
+    return ""
+  end
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 2) Template substitution: "{dst} + {imm64}" => with env values
+  ///////////////////////////////////////////////////////////////////////////
+
+  proc emit_subst_line out Buf* tmpl string env Env* -> void requires heap_alloc:
+    let i u64 = 0
+    let n u64 = #len tmpl
+
+    while i < n:
+      let ch u8 = #byte tmpl i
+      if ch != '{':
+        buf_push_byte out ch
+        i = i + 1
+      else:
+        // parse name until '}'
+        i = i + 1
+        let start u64 = i
+        while i < n and (#byte tmpl i) != '}':
+          i = i + 1
+        end
+        let end u64 = i
+        if i < n and (#byte tmpl i) == '}':
+          i = i + 1
+        end
+
+        let name string = #substr tmpl start (end - start)
+        let val string = env_get env name
+
+        if val == "":
+          // keep placeholder visible if missing
+          buf_push_byte out '{'
+          buf_push_cstr out name
+          buf_push_byte out '}'
+        else:
+          buf_push_cstr out val
+        end
+      end
+    end
+
+    buf_nl out
+  end
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 3) Entry selection by op + emission
+  ///////////////////////////////////////////////////////////////////////////
+
+  // IMPORTANT:
+  // - This expects TABLE is a fixed-size array.
+  // - If you change TABLE size, update TABLE_LEN accordingly.
+  const TABLE_LEN u32 = 128
+
+  // Minimal view of Entry (must match the one in rane_codegen_table)
+  struct Entry:
+    op string
+    kind i32
+    width i32
+    form string
+    nasm [8]string
+  end
+
+  proc find_entry op string -> Entry*:
+    let i u32 = 0
+    while i < TABLE_LEN:
+      if TABLE[i].op == op:
+        return &TABLE[i]
+      end
+      i = i + 1
+    end
+    return null
+  end
+
+  proc emit_op out Buf* op string env Env* -> void requires heap_alloc:
+    let e Entry* = find_entry op
+    if e == null:
+      buf_push_cstr out "; ERROR: unknown op "
+      buf_push_cstr out op
+      buf_nl out
+      return
+    end
+
+    let k u32 = 0
+    while k < 8:
+      let ln string = e.nasm[k]
+      if ln != "":
+        emit_subst_line out ln env
+      end
+      k = k + 1
+    end
+  end
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 4) RSP-only default strategy
+  ///////////////////////////////////////////////////////////////////////////
+  //
+  // Your TABLE includes "fn.prolog"/"fn.epilog" using RBP.
+  // To keep RSP-only as default, we provide tiny wrappers that:
+  // - either emit the RBP prolog/epilog (debug/interop)
+  // - or emit a minimal RSP frame without touching RBP (default)
+  //
+  // If you want pure 1:1 with the posted TABLE only, set use_rbp = true.
+
+  proc emit_prolog out Buf* env Env* use_rbp bool -> void requires heap_alloc:
+    if use_rbp:
+      emit_op out "fn.prolog" env
+    else:
+      // RSP-only prolog (keeps rbp free)
+      // expects {frame_size_aligned} placeholder
+      emit_subst_line out "sub rsp, {frame_size_aligned}" env
+      emit_subst_line out "; (rsp-only) rbp is free for GP use" env
+    end
+  end
+
+  proc emit_epilog out Buf* env Env* use_rbp bool -> void requires heap_alloc:
+    if use_rbp:
+      emit_op out "fn.epilog" env
+    else:
+      emit_subst_line out "add rsp, {frame_size_aligned}" env
+      emit_subst_line out "ret" env
+    end
+  end
+
+  ///////////////////////////////////////////////////////////////////////////
+  // 5) Example: drive the emitter with regalloc-provided operands
+  ///////////////////////////////////////////////////////////////////////////
+
+  proc demo -> void requires heap_alloc:
+    let out Buf = buf_init 8192
+    let env Env = env_init 32
+
+    // .text header
+    buf_push_cstr &out "section .text"
+    buf_nl &out
+    buf_push_cstr &out "global main"
+    buf_nl &out
+    buf_push_cstr &out "main:"
+    buf_nl &out
+
+    // frame sizing decided by your frame planner (already aligned)
+    env_put &env "frame_size_aligned" "0x60"
+
+    // default: rsp-only
+    let use_rbp bool = false
+    emit_prolog &out &env use_rbp
+
+    // Pretend regalloc produced these physical operands:
+    // i64.const  r10, 42
+    env_put &env "dst" "r10"
+    env_put &env "imm64" "42"
+    emit_op &out "i64.const" &env
+
+    // i64.add rax = r10 + [rsp+32]
+    env_put &env "dst" "rax"
+    env_put &env "a"   "r10"
+    env_put &env "b"   "qword [rsp+32]"
+    emit_op &out "i64.add" &env
+
+    // i64.cmp.lt  al = (rax < 100)
+    env_put &env "dst8" "al"
+    env_put &env "a"    "rax"
+    env_put &env "b"    "100"
+    emit_op &out "i64.cmp.lt" &env
+
+    // br.if cond=al to L_true/L_false
+    env_put &env "cond" "al"
+    env_put &env "lbl_true"  "L_true"
+    env_put &env "lbl_false" "L_false"
+    emit_op &out "br.if" &env
+
+    // label L_true
+    env_put &env "lbl" "L_true"
+    emit_op &out "label" &env
+    emit_op &out "trap" &env
+    env_put &env "lbl" "L_end"
+    emit_op &out "br" &env
+
+    // label L_false
+    env_put &env "lbl" "L_false"
+    emit_op &out "label" &env
+    emit_op &out "halt" &env
+
+    // label L_end
+    env_put &env "lbl" "L_end"
+    emit_op &out "label" &env
+
+    emit_epilog &out &env use_rbp
+
+    // Print (replace with print_bytes(ptr,len) in your real runtime)
+    print "----- NASM (demo) -----"
+    print (out.ptr as string)
+
+    env_free &env
+    buf_free &out
+  end
+
+end
