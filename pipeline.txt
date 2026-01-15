@@ -1,0 +1,19 @@
+syntax.rane
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Lexer / Tokenizer
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Parser
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+AST
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Resolver
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Typed CIL (Typed Common Intermediary Language)
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+OSW (Optimized Structure Web)
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Frame Planner
+   ↓ ➡️CIAMs (Contextual Inference Abstraction Macros)
+Codegen (.exe x64 PE) / NASM Emitters
+
+
