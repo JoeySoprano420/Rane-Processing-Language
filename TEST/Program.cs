@@ -32,7 +32,7 @@ internal static class Program
                 }
                 catch
                 {
-                    // unable to read file — skip
+                    // unable to read file â€” skip
                     continue;
                 }
 
