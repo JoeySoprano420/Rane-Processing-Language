@@ -70,7 +70,7 @@ Lexer / Tokenizer
 ↓ CIAM: contextual shaping 
 Parser 
 ↓ CIAM: grammatical normalization 
-Structural Tree (AST/SMD) 
+Structural Tree (AST/SMD) [Syntax Map Diagram] 
 ↓ CIAM: semantic locking 
 Resolver (names · scopes · capabilities · ownership) 
 ↓ CIAM: semantic materialization 
