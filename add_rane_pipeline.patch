@@ -1,0 +1,301 @@
+*** Begin Patch
+*** Update File: RANE_Today/RANE_Today.vcxproj.filters
+@@
+-<?xml version="1.0" encoding="utf-8"?>
+-<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+-  <ItemGroup>
+-    <Filter Include="Source Files">
+-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+-      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+-    </Filter>
+-    <Filter Include="Header Files">
+-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+-      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+-    </Filter>
+-    <Filter Include="Resource Files">
+-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+-    </Filter>
+-
+-  </ItemGroup>
+-</Project>
++<?xml version="1.0" encoding="utf-8"?>
++<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
++  <ItemGroup>
++    <Filter Include="Source Files">
++      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
++      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
++    </Filter>
++    <Filter Include="Header Files">
++      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
++      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
++    </Filter>
++    <Filter Include="Resource Files">
++      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
++      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
++    </Filter>
++
++    <!-- RANE Pipeline filter -->
++    <Filter Include="RANE Pipeline">
++      <UniqueIdentifier>{A1B2C3D4-1111-4444-8888-1234567890AB}</UniqueIdentifier>
++      <Extensions>rane;ciam;typedcil;osw;plan;smd;md;txt</Extensions>
++    </Filter>
++  </ItemGroup>
++
++  <ItemGroup>
++    <None Include="pipeline\syntax.rane">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\CIAM_intent_recognition.ciam">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\Lexer_Tokenizer.txt">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\CIAM_contextual_shaping.ciam">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\Parser.txt">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\CIAM_grammatical_normalization.ciam">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\Structural_Tree_AST.smd">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\CIAM_semantic_locking.ciam">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\Resolver.smd">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\CIAM_semantic_materialization.ciam">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\Typed_CIL.typedcil">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\CIAM_structural_optimization.ciam">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\OSW.osw">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\CIAM_ABI_truth.ciam">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\Frame_Planner.plan">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\CIAM_emission_law.ciam">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++    <None Include="pipeline\x64_codegen_to_windows_pe.md">
++      <Filter>RANE Pipeline</Filter>
++    </None>
++  </ItemGroup>
++</Project>
+*** End Patch
+*** Add File: RANE_Today/pipeline/syntax.rane
++#!/usr/bin/env rane
++# syntax.rane
++# Canonical surface forms accepted by the RANE front-end.
++# This file lists canonical examples and minimal grammar samples used as
++# the authoritative reference for intent recognition.
++
++with open "path" as f
++defer close f
++start at node start
++choose max a b
++match p:
++  case Data d:
++    ...
++
++# Note: authoritative surface syntax reference used by CIAMs.
+*** End Patch
+*** Add File: RANE_Today/pipeline/CIAM_intent_recognition.ciam
++#
++# CIAM: intent recognition
++# Role: identify human-shaped intent forms and emit canonical intent nodes.
++# Pattern: surface syntax patterns (e.g., "with open", "choose", "defer", "match")
++# Context: raw token stream + syntax.rane reference
++# Rewrite: produce Intent nodes (Intent(kind, payload, sourceRange))
++# Invariants: intent node preserves original source span and raw tokens
++# Audit: {timestamp, ruleId, matchedText, rewriteSummary}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/Lexer_Tokenizer.txt
++#
++# Lexer / Tokenizer
++# Role: convert input text into tokens with locations and token kinds.
++# Token kinds: Identifier, Keyword, StringLiteral, Number, Punctuator, Indent, Dedent, Newline, EOF
++# Output: token stream with (kind, lexeme, startPos, endPos)
++# Determinism: lexical rules are ordered and deterministic; no ambiguity allowed.
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/CIAM_contextual_shaping.ciam
++#
++# CIAM: contextual shaping
++# Role: attach lexical context, normalize ambiguous tokens, and produce shaped tokens.
++# Pattern: ambiguous lexemes (identifiers vs keywords, symbol overloading)
++# Context: surrounding tokens, current lexical scope, syntax.rane rules
++# Rewrite: shaped-token stream with disambiguated kinds and contextual annotations
++# Invariants: shaped-token stream is lossless with respect to original tokens
++# Audit: {ruleId, beforeTokensHash, afterTokensHash, rationale}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/Parser.txt
++#
++# Parser
++# Role: produce a structural tree (AST/SMD) from shaped tokens.
++# Input: shaped token stream
++# Output: tree nodes with nodeKind, children, sourceRange
++# Error policy: recoverable parse errors produce explicit Error nodes; parser never panics.
++# Determinism: grammar is LALR/LL-based with CIAM normalization to remove ambiguity.
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/CIAM_grammatical_normalization.ciam
++#
++# CIAM: grammatical normalization
++# Role: rewrite parsed trees into canonical grammatical forms (normalize syntactic sugar).
++# Pattern: syntactic sugar nodes (e.g., for-exprs, with -> try/finally shorthand)
++# Context: parsed tree, syntax.rane canonical mappings
++# Rewrite: canonical AST nodes (normalized)
++# Invariants: semantics-preserving; mapping must be reversible for audit
++# Audit: {ruleId, matchedNodeKinds, rewriteSummary}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/Structural_Tree_AST.smd
++#
++# Structural Tree (AST / SMD)
++# Role: canonical structural representation used by downstream semantic passes.
++# Node format (example):
++# Node { id, kind, type?, children[], attributes{capabilities, ownership, annotations}, sourceRange }
++#
++# Example:
++# Node(1) kind=Function name="main" children=[2] attributes={caps:[],owner:null}
++# Node(2) kind=Block children=[3,4]
++# Node(3) kind=With intent="open" ...
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/CIAM_semantic_locking.ciam
++#
++# CIAM: semantic locking
++# Role: lock node shapes to semantic typings and capability placeholders.
++# Pattern: normalized AST nodes lacking resolved names/types
++# Context: symbol table seeds, declared capabilities
++# Rewrite: typed node skeletons with unresolved references turned into resolvable placeholders
++# Invariants: locked nodes preserve ownership and capability annotations
++# Audit: {ruleId, nodesLocked, typeHintsApplied}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/Resolver.smd
++#
++# Resolver
++# Role: resolve names, scopes, capabilities, and ownership; perform name binding.
++# Responsibilities:
++# - symbol resolution (module / local / builtin)
++# - capability gating (attach requires/guarantees)
++# - ownership assignment and borrow rules
++# Output: resolved AST where every reference binds to a definition or explicit error node
++#
++# Example record:
++# Symbol(name="open",def=BuiltIn::open,capabilities=[io],scope=global)
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/CIAM_semantic_materialization.ciam
++#
++# CIAM: semantic materialization
++# Role: turn resolved AST into Typed CIL (Typed Common Intermediary Language).
++# Pattern: resolved nodes, ownership and capability annotations
++# Context: resolver output, type system rules
++# Rewrite: Typed CIL nodes (instructions, typed values, effect tokens)
++# Invariants: type-soundness constraints must hold; capabilities must be explicit
++# Audit: {ruleId, producedNodesCount, typeConsistencyHash}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/Typed_CIL.typedcil
++#
++# Typed CIL (Typed Common Intermediary Language)
++# Minimal example instruction sequence:
++# func main() : i32 {
++#   t0 = const.i32 0
++#   call debug_print(t0) requires debug_io
++#   ret t0
++# }
++#
++# Typed CIL nodes include: Const, Call, Load, Store, Branch, Phi, Ret
++# Each instruction carries precise types and capability annotations.
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/CIAM_structural_optimization.ciam
++#
++# CIAM: structural optimization
++# Role: apply provable optimizations on Typed CIL (constant folding, dead node elimination, CIAM-guided rewrites)
++# Pattern: local optimization patterns and whole-graph rewrites
++# Context: Typed CIL, CIAM invariants, cost models
++# Rewrite: produce OSW (Optimized Structure Web)
++# Invariants: correctness proof fragments attached to each rewrite
++# Audit: {ruleId, rewritesApplied[], proofReferences[]}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/OSW.osw
++#
++# OSW (Optimized Structure Web)
++# Role: optimized, canonical graph form used for frame planning
++# Format: Graph nodes (ops), edges (data/control), annotations (latency, registerAffinity)
++# Example node entry:
++# op#42 kind=Add type=i64 latency=1 affinity={RAX, RBX}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/CIAM_ABI_truth.ciam
++#
++# CIAM: ABI truth
++# Role: enforce ABI constraints and contractually map high-level calls to target ABI patterns.
++# Pattern: call sites, extern declarations, calling conventions usage
++# Context: target platform (Windows x64), calling conventions, import table requirements
++# Rewrite: annotate call sites with ABI frame requirements and linkage metadata
++# Invariants: ABI correctness; no silent ABI mismatches
++# Audit: {ruleId, callSitesAnnotated, abiViolations[]}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/Frame_Planner.plan
++#
++# Frame Planner
++# Role: map OSW nodes into concrete stack frames, virtual registers -> stack slots, spills, and calling frames.
++# Output: per-function FramePlan {stackSize, calleeSaved, argLocations, spillMap}
++#
++# Example:
++# FramePlan for main:
++# stackSize=64
++# calleeSaved=[rbx, rsi]
++# argLocations={0:rcx, 1:rdx}
++# spillMap={t3: [rbp-8], t4: [rbp-16]}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/CIAM_emission_law.ciam
++#
++# CIAM: emission law
++# Role: final structural rewrite rules guaranteeing correctness of instruction selection and binary emission.
++# Pattern: FramePlan + OSW nodes
++# Context: ABI truth, CPU instruction templates, machine constraints
++# Rewrite: instruction sequences with physical register allocation and final fixups
++# Invariants: each instruction maps to a legal machine encoding; relocations and imports are explicit
++# Audit: {ruleId, instructionsEmitted, relocationEntries}
++
+*** End Patch
+*** Add File: RANE_Today/pipeline/x64_codegen_to_windows_pe.md
++#
++# x64 Codegen → Windows PE (.exe)
++# Role: lower final instruction sequences into machine code and emit a PE image.
++# Responsibilities:
++# - encode instruction bytes
++# - generate PE sections (.text, .rdata, .idata)
++# - build import table and export table as required
++# - produce deterministic timestamps/headers (AOT deterministic)
++# - checksum and emit .exe
++#
++# Verification: produce sidecar audit manifest describing offsets, relocations, imports, and CIAM audit chains.
++
+*** End Patch
