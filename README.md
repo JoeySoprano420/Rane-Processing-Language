@@ -80,7 +80,10 @@ OSW (Optimized Structure Web)
 ↓ CIAM: ABI truth 
 Frame Planner 
 ↓ CIAM: emission law 
-x64 Codegen → Windows PE (.exe) 
+x64 Codegen → Windows PE (.exe)
+
+CIAM (Contextual Inference Abstraction Macro)
+
 ``` 
 This pipeline is **closed**. 
 Nothing bypasses it. 
