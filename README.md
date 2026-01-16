@@ -1,3 +1,6 @@
+This is what we are building. Think of it like we have a 1-billion-piece puzzle, and this is the reference picture of it once finished.
+
+
 # 🌐 RANE — EXECUTION STRUCTURE OVERVIEW 
 **Reliable · Adaptive · Natural · Efficient** 
 **RANE is not a programming language.** 
