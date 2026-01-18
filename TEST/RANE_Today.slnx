@@ -1,7 +1,0 @@
-<Solution>
-  <Configurations>
-    <Platform Name="x64" />
-    <Platform Name="x86" />
-  </Configurations>
-  <Project Path="RANE_Today/RANE_Today.vcxproj" Id="a7a7d229-285c-4b1a-a712-3c99b31a1161" />
-</Solution>
